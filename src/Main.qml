@@ -432,10 +432,13 @@ Kirigami.ApplicationWindow {
         property bool preserveFieldsWhileLoading: false
         property bool detailLoadRequested: false
         property bool detailReady: false
+        property bool commentSubmitting: false
         property var localDetail: ({})
+        property alias commentDraft: commentField.text
         readonly property var relationshipDetail: localDetail
         readonly property var dependencies: relationshipDetail.dependencies || []
         readonly property var dependents: relationshipDetail.dependents || []
+        readonly property var comments: localDetail.comments || []
         readonly property real formFieldWidth: Math.max(
             Kirigami.Units.gridUnit * 16,
             Math.min(
@@ -494,6 +497,24 @@ Kirigami.ApplicationWindow {
             preserveFieldsWhileLoading = true;
             Backend.addDependency(issueId, targetId, relationshipTypeField.currentValue);
             relationshipTargetField.clear();
+        }
+
+        function formatCommentDate(value) {
+            if (!value)
+                return "";
+            const date = new Date(value);
+            if (isNaN(date.getTime()))
+                return String(value);
+            return date.toLocaleString(Qt.locale(), Locale.ShortFormat);
+        }
+
+        function submitComment() {
+            const text = commentField.text.trim();
+            if (text.length === 0 || Backend.loading || !detailReady)
+                return;
+            preserveFieldsWhileLoading = true;
+            commentSubmitting = true;
+            Backend.addComment(issueId, text);
         }
 
         function requestDetail() {
@@ -587,6 +608,11 @@ Kirigami.ApplicationWindow {
                         editor.detailReady = true;
                     }
                     editor.detailLoadRequested = false;
+                    if (editor.commentSubmitting) {
+                        if (Backend.errorMessage.length === 0)
+                            commentField.clear();
+                        editor.commentSubmitting = false;
+                    }
                     if (editor.preserveFieldsWhileLoading)
                         editor.preserveFieldsWhileLoading = false;
                     else
@@ -986,6 +1012,98 @@ Kirigami.ApplicationWindow {
                         placeholderText: qsTr("Additional notes")
                     }
                 }
+
+                ColumnLayout {
+                    id: commentsSection
+                    objectName: "commentsSection"
+                    Kirigami.FormData.label: qsTr("Comments:")
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
+                    visible: !editor.creating
+                    implicitWidth: editor.formFieldWidth
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.gridUnit
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Kirigami.Separator {
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: Kirigami.Units.largeSpacing
+                    }
+
+                    Controls.BusyIndicator {
+                        visible: !editor.detailReady
+                        running: visible
+                        implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                        implicitHeight: implicitWidth
+                    }
+
+                    Controls.Label {
+                        visible: editor.detailReady && editor.comments.length === 0
+                        text: qsTr("No comments yet")
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+
+                    Repeater {
+                        model: editor.comments
+
+                        delegate: Controls.Frame {
+                            id: commentCard
+                            objectName: "commentCard"
+                            required property var modelData
+                            Layout.fillWidth: true
+                            padding: Kirigami.Units.largeSpacing
+
+                            contentItem: ColumnLayout {
+                                spacing: Kirigami.Units.smallSpacing
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    Controls.Label {
+                                        text: commentCard.modelData.author || qsTr("Unknown author")
+                                        font.weight: Font.DemiBold
+                                        Layout.fillWidth: true
+                                    }
+                                    Controls.Label {
+                                        text: editor.formatCommentDate(commentCard.modelData.created_at)
+                                        color: Kirigami.Theme.disabledTextColor
+                                    }
+                                }
+                                Controls.Label {
+                                    objectName: "commentText"
+                                    text: commentCard.modelData.text || ""
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.Wrap
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+                    }
+
+                    Controls.TextArea {
+                        id: commentField
+                        objectName: "commentField"
+                        Layout.fillWidth: true
+                        implicitHeight: Kirigami.Units.gridUnit * 5
+                        wrapMode: TextEdit.Wrap
+                        placeholderText: qsTr("Add a comment")
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        Item { Layout.fillWidth: true }
+                        Controls.Button {
+                            objectName: "addCommentButton"
+                            text: qsTr("Comment")
+                            icon.name: "mail-send"
+                            enabled: !Backend.loading
+                                && editor.detailReady
+                                && commentField.text.trim().length > 0
+                            onClicked: editor.submitComment()
+                        }
+                    }
+                }
+
             }
         }
     }

@@ -6,7 +6,7 @@ use std::process::Command;
 use std::str::FromStr;
 use std::thread;
 
-use bd_client::{Client, Issue, IssueUpdate, LinkedIssue, NewIssue, Status};
+use bd_client::{Client, Comment, Issue, IssueUpdate, LinkedIssue, NewIssue, Status};
 use qtbridge::{QApp, QObjectHolder, invoke_method, qobject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -313,6 +313,33 @@ impl Backend {
     }
 
     #[qslot]
+    fn add_comment(&mut self, issue_id: String, text: String) {
+        if self.loading {
+            return;
+        }
+        let issue_id = issue_id.trim().to_string();
+        let text = text.trim().to_string();
+        if issue_id.is_empty() {
+            self.set_error("Cannot comment on an issue without an ID".to_string());
+            return;
+        }
+        if text.is_empty() {
+            self.set_error("Comment cannot be empty".to_string());
+            return;
+        }
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = add_comment_and_list(workspace, &issue_id, &text);
+            let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishAddComment", payload, error);
+        });
+    }
+
+    #[qslot]
     fn choose_workspace(&mut self) {
         if self.loading {
             return;
@@ -441,6 +468,15 @@ impl Backend {
 
     #[qslot(qml_name = "finishAddDependency")]
     fn finish_add_dependency(&mut self, payload: String, error: String) {
+        self.finish_detail_mutation(payload, error, "relationships");
+    }
+
+    #[qslot(qml_name = "finishAddComment")]
+    fn finish_add_comment(&mut self, payload: String, error: String) {
+        self.finish_detail_mutation(payload, error, "comments");
+    }
+
+    fn finish_detail_mutation(&mut self, payload: String, error: String, field: &str) {
         if !error.is_empty() {
             self.set_error(error);
             self.set_loading(false);
@@ -455,7 +491,7 @@ impl Backend {
                         self.detail_changed();
                     }
                     Err(error) => {
-                        self.set_error(format!("Could not encode updated relationships: {error}"))
+                        self.set_error(format!("Could not encode updated {field}: {error}"))
                     }
                 }
                 match issues_to_values(result.issues) {
@@ -467,7 +503,7 @@ impl Backend {
                 }
             }
             Err(error) => {
-                self.set_error(format!("Could not decode updated relationships: {error}"));
+                self.set_error(format!("Could not decode updated {field}: {error}"));
             }
         }
         self.set_loading(false);
@@ -599,6 +635,7 @@ struct IssueDetail {
     issue: Issue,
     dependencies: Vec<LinkedIssue>,
     dependents: Vec<LinkedIssue>,
+    comments: Vec<Comment>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -685,6 +722,7 @@ fn load_issue_detail(client: &Client, id: &str) -> Result<IssueDetail, bd_client
         issue: client.show(id)?,
         dependencies: client.dependencies(id)?,
         dependents: client.dependents(id)?,
+        comments: client.comments(id)?,
     })
 }
 
@@ -696,6 +734,18 @@ fn add_dependency_and_list(
 ) -> Result<DetailMutationResult, bd_client::Error> {
     let client = Client::new(workspace)?;
     client.add_dependency(issue_id, depends_on_id, dependency_type)?;
+    let detail = load_issue_detail(&client, issue_id)?;
+    let issues = client.list()?;
+    Ok(DetailMutationResult { detail, issues })
+}
+
+fn add_comment_and_list(
+    workspace: String,
+    issue_id: &str,
+    text: &str,
+) -> Result<DetailMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    client.add_comment(issue_id, text)?;
     let detail = load_issue_detail(&client, issue_id)?;
     let issues = client.list()?;
     Ok(DetailMutationResult { detail, issues })

@@ -106,6 +106,63 @@ Item {
             compare(Backend.lastDependencyType, "blocks");
         }
 
+        function test_existing_issue_displays_and_submits_comments() {
+            Backend.detail = {
+                "id": "test-existing",
+                "title": "Existing issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": [{
+                    "id": "comment-1",
+                    "issue_id": "test-existing",
+                    "author": "Test User",
+                    "text": "Existing comment",
+                    "created_at": "2026-07-21T12:00:00Z"
+                }]
+            };
+            createApp();
+            app.openEditor("test-existing");
+            const editor = findChild(app, "editorPage");
+            compare(editor.comments.length, 1);
+            editor.detailReady = true;
+            compare(editor.comments[0].text, "Existing comment");
+
+            editor.commentDraft = "  \n";
+            editor.submitComment();
+            compare(Backend.addCommentCallCount, 0);
+
+            findChild(editor, "titleField").text = "Unsaved title";
+            editor.commentDraft = "A new comment";
+            editor.submitComment();
+            compare(Backend.addCommentCallCount, 1);
+            compare(Backend.lastCommentIssueId, "test-existing");
+            compare(Backend.lastCommentText, "A new comment");
+            compare(editor.commentDraft, "A new comment");
+
+            Backend.loading = true;
+            Backend.detail = {
+                "id": "test-existing",
+                "title": "Existing issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            Backend.loading = false;
+
+            compare(editor.commentDraft, "");
+            compare(findChild(editor, "titleField").text, "Unsaved title");
+        }
+
         function test_back_from_linked_issue_retains_parent_detail() {
             Backend.detail = {
                 "id": "test-parent",

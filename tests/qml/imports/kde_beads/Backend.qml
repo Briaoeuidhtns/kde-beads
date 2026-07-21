@@ -17,6 +17,7 @@ QtObject {
     property int saveIssueCallCount: 0
     property int createIssueCallCount: 0
     property int addDependencyCallCount: 0
+    property int addCommentCallCount: 0
     property int addAttachmentCallCount: 0
     property int openAttachmentCallCount: 0
     property int removeAttachmentCallCount: 0
@@ -29,6 +30,8 @@ QtObject {
     property string lastDependencyIssueId: ""
     property string lastDependsOnId: ""
     property string lastDependencyType: ""
+    property string lastCommentIssueId: ""
+    property string lastCommentText: ""
     property string lastAttachmentIssueId: ""
     property string lastAttachmentId: ""
 
@@ -47,6 +50,7 @@ QtObject {
         saveIssueCallCount = 0;
         createIssueCallCount = 0;
         addDependencyCallCount = 0;
+        addCommentCallCount = 0;
         addAttachmentCallCount = 0;
         openAttachmentCallCount = 0;
         removeAttachmentCallCount = 0;
@@ -59,6 +63,8 @@ QtObject {
         lastDependencyIssueId = "";
         lastDependsOnId = "";
         lastDependencyType = "";
+        lastCommentIssueId = "";
+        lastCommentText = "";
         lastAttachmentIssueId = "";
         lastAttachmentId = "";
     }
@@ -93,6 +99,12 @@ QtObject {
         lastDependencyIssueId = issueId;
         lastDependsOnId = dependsOnId;
         lastDependencyType = dependencyType;
+    }
+
+    function addComment(issueId, text) {
+        addCommentCallCount += 1;
+        lastCommentIssueId = issueId;
+        lastCommentText = text;
     }
 
     function addAttachment(issueId) {

@@ -77,6 +77,18 @@ pub struct LinkedIssue {
     pub dependency_type: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Comment {
+    pub id: String,
+    pub issue_id: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub created_at: String,
+}
+
 fn default_priority() -> u8 {
     2
 }
@@ -225,6 +237,14 @@ impl Client {
         self.relationships(id, "up")
     }
 
+    pub fn comments(&self, id: &str) -> Result<Vec<Comment>, Error> {
+        let payload = self.run(true, &["comments", id, "--json"])?;
+        serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+            operation: "comments",
+            source,
+        })
+    }
+
     fn show_raw(&self, id: &str) -> Result<Issue, Error> {
         let payload = self.run(true, &["show", id, "--json"])?;
         parse_single_issue("show", &payload)
@@ -333,6 +353,14 @@ impl Client {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn add_comment(&self, issue_id: &str, text: &str) -> Result<Comment, Error> {
+        let payload = self.run(false, &["comments", "add", issue_id, text, "--json"])?;
+        serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+            operation: "comments add",
+            source,
+        })
     }
 
     fn relationships(&self, id: &str, direction: &str) -> Result<Vec<LinkedIssue>, Error> {

@@ -307,3 +307,29 @@ fn creates_child_and_blocking_relationships() {
             .any(|issue| issue.id == child.id && issue.dependency_type == "parent-child")
     );
 }
+
+#[test]
+fn adds_and_lists_comments() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let issue = client
+        .create(&new_issue("Commented issue", Status::Open))
+        .expect("create issue");
+
+    let first = client
+        .add_comment(&issue.id, "First comment")
+        .expect("add first comment");
+    let second = client
+        .add_comment(&issue.id, "Second comment\nwith another line")
+        .expect("add second comment");
+    let comments = client.comments(&issue.id).expect("list comments");
+
+    assert_eq!(first.issue_id, issue.id);
+    assert_eq!(first.text, "First comment");
+    assert!(!first.author.is_empty());
+    assert!(!first.created_at.is_empty());
+    assert_eq!(second.text, "Second comment\nwith another line");
+    assert_eq!(comments.len(), 2);
+    assert_eq!(comments[0].id, first.id);
+    assert_eq!(comments[1].id, second.id);
+}
