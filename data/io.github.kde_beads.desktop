@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Beads
+GenericName=Issue Viewer
+Comment=Browse Beads issues in a native KDE application
+Exec=kde-beads
+Icon=view-task
+Terminal=false
+Categories=Development;Utility;
+Keywords=issues;tasks;beads;project;
+StartupNotify=true
