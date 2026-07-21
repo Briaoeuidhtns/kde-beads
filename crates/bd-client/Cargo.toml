@@ -1,0 +1,11 @@
+[package]
+name = "bd-client"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+description = "Typed process interface for the Beads CLI"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

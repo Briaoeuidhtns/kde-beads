@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::fmt::Display;
+use std::path::PathBuf;
 use std::thread;
 
+use bd_client::Client;
 use qtbridge::{QApp, QObjectHolder, invoke_method, qobject};
+use serde::Serialize;
 use serde_json::{Value, json};
 use url::Url;
 
@@ -79,10 +81,8 @@ impl Backend {
         let workspace = self.workspace.clone();
         let invoker = self.get_qml_method_invoker();
         thread::spawn(move || {
-            let (payload, error) = command_result(run_bd(
-                Path::new(&workspace),
-                &["list", "--json", "--all", "--limit", "0"],
-            ));
+            let result = Client::new(workspace).and_then(|client| client.list());
+            let (payload, error) = encode_result(result);
             invoke_method!(invoker, "finishReload", payload, error);
         });
     }
@@ -108,10 +108,8 @@ impl Backend {
         let workspace = self.workspace.clone();
         let invoker = self.get_qml_method_invoker();
         thread::spawn(move || {
-            let (payload, error) = command_result(run_bd(
-                Path::new(&workspace),
-                &["show", id.as_str(), "--json"],
-            ));
+            let result = Client::new(workspace).and_then(|client| client.show(&id));
+            let (payload, error) = encode_result(result.map(|issue| vec![issue]));
             invoke_method!(invoker, "finishShowIssue", payload, error);
         });
     }
@@ -229,33 +227,16 @@ fn normalize_workspace(input: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn run_bd(workspace: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("bd")
-        .arg("--readonly")
-        .args(args)
-        .current_dir(workspace)
-        .output()
-        .map_err(|error| format!("Could not start bd: {error}"))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if output.status.success() {
-        return Ok(stdout);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let detail = if stderr.is_empty() { stdout } else { stderr };
-    let command = args.first().copied().unwrap_or("command");
-    if detail.is_empty() {
-        Err(format!("bd {command} failed with {}", output.status))
-    } else {
-        Err(format!("bd {command} failed: {detail}"))
-    }
-}
-
-fn command_result(result: Result<String, String>) -> (String, String) {
+fn encode_result<T: Serialize, E: Display>(result: Result<T, E>) -> (String, String) {
     match result {
-        Ok(payload) => (payload, String::new()),
-        Err(error) => (String::new(), error),
+        Ok(value) => match serde_json::to_string(&value) {
+            Ok(payload) => (payload, String::new()),
+            Err(error) => (
+                String::new(),
+                format!("Could not encode bd result: {error}"),
+            ),
+        },
+        Err(error) => (String::new(), error.to_string()),
     }
 }
 
@@ -285,25 +266,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_list_output() {
-        let issues = parse_issue_list(r#"[{"id":"bd-1","title":"First"}]"#).unwrap();
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0]["id"], "bd-1");
-    }
-
-    #[test]
-    fn parses_single_detail() {
-        let detail = parse_issue_detail(r#"[{"id":"bd-1","status":"open"}]"#).unwrap();
-        assert_eq!(detail["status"], "open");
-    }
-
-    #[test]
-    fn rejects_unexpected_detail_shape() {
-        let error = parse_issue_detail("[]").unwrap_err();
-        assert!(error.contains("instead of one"));
-    }
 
     #[test]
     fn accepts_file_urls_for_workspaces() {
