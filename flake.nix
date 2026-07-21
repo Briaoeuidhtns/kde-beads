@@ -9,6 +9,22 @@
       pkgs = import nixpkgs { inherit system; };
       inherit (pkgs) lib;
       qtdeclarative = pkgs.kdePackages.qtdeclarative;
+      qtNativeBuildInputs = with pkgs; [
+        pkg-config
+        kdePackages.wrapQtAppsHook
+      ];
+      qtBuildInputs = with pkgs.kdePackages; [
+        qtbase
+        qtdeclarative
+        kirigami
+        qqc2-desktop-style
+      ];
+      qtRuntimeInputs = qtBuildInputs ++ (with pkgs.kdePackages; [
+        kirigami.unwrapped
+        sonnet
+      ]);
+      qtQmlImportPath = lib.makeSearchPath "lib/qt-6/qml" qtRuntimeInputs;
+      qtPluginPath = lib.makeSearchPath "lib/qt-6/plugins" qtRuntimeInputs;
       qtQmlCxxFlags = lib.concatStringsSep " " [
         "-I${qtdeclarative}/include"
         "-I${qtdeclarative}/include/QtQml"
@@ -28,17 +44,14 @@
         # separately. QtBridge needs these paths for its generated C++.
         CXXFLAGS = qtQmlCxxFlags;
 
-        nativeBuildInputs = with pkgs; [
-          pkg-config
-          kdePackages.wrapQtAppsHook
-        ];
+        nativeBuildInputs = qtNativeBuildInputs;
+        nativeCheckInputs = with pkgs; [ beads git ];
+        buildInputs = qtBuildInputs;
 
-        buildInputs = with pkgs.kdePackages; [
-          qtbase
-          qtdeclarative
-          kirigami
-          qqc2-desktop-style
-        ];
+        preCheck = ''
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+        '';
 
         qtWrapperArgs = [
           "--prefix PATH : ${lib.makeBinPath [ pkgs.beads pkgs.kdePackages.kdialog ]}"
@@ -64,12 +77,51 @@
         meta.description = "Browse Beads issues with KDE Beads";
       };
 
+      checks.${system}.tests = pkgs.rustPlatform.buildRustPackage {
+        pname = "kde-beads-tests";
+        version = "0.1.0";
+        src = self;
+
+        cargoLock.lockFile = ./Cargo.lock;
+        CXXFLAGS = qtQmlCxxFlags;
+        QT_QUICK_CONTROLS_STYLE = "org.kde.desktop";
+        QML2_IMPORT_PATH = qtQmlImportPath;
+        QML_IMPORT_PATH = qtQmlImportPath;
+        QT_PLUGIN_PATH = qtPluginPath;
+
+        nativeBuildInputs = qtNativeBuildInputs ++ (with pkgs; [
+          beads
+          cargo-nextest
+          git
+          kdePackages.qtdeclarative
+        ]);
+        buildInputs = qtBuildInputs;
+
+        doCheck = true;
+        checkPhase = ''
+          runHook preCheck
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+          bash ./scripts/test
+          runHook postCheck
+        '';
+
+        installPhase = ''
+          runHook preInstall
+          mkdir -p "$out"
+          cp target/test-results/*.xml "$out/"
+          runHook postInstall
+        '';
+      };
+
       devShells.${system}.default = pkgs.mkShell {
         inputsFrom = [ self.packages.${system}.default ];
         packages = with pkgs; [
           beads
           cargo
+          cargo-nextest
           clippy
+          git
           kdePackages.kdialog
           rustc
           rustfmt

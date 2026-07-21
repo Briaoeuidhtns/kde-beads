@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+report_dir="$root_dir/target/test-results"
+rust_report="$root_dir/target/nextest/ci/junit.xml"
+status=0
+
+mkdir -p "$report_dir"
+rm -f "$rust_report" "$report_dir/rust.xml" "$report_dir/qml.xml"
+
+if ! cargo nextest run --workspace --profile ci; then
+    status=1
+fi
+if [[ -f "$rust_report" ]]; then
+    cp "$rust_report" "$report_dir/rust.xml"
+fi
+
+if ! qmltestrunner \
+    -input "$root_dir/tests/qml" \
+    -import "$root_dir/tests/qml/imports" \
+    -platform offscreen \
+    -o -,txt \
+    -o "$report_dir/qml.xml",junitxml; then
+    status=1
+fi
+
+exit "$status"

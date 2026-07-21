@@ -10,6 +10,7 @@ import kde_beads
 
 Kirigami.ApplicationWindow {
     id: root
+    objectName: "applicationWindow"
 
     width: 1280
     height: 760
@@ -48,7 +49,6 @@ Kirigami.ApplicationWindow {
     function openEditor(issueId) {
         if (Backend.loading)
             return;
-        Backend.loadIssue(issueId);
         pageStack.layers.push(editorPageComponent, { "issueId": issueId });
     }
 
@@ -60,6 +60,7 @@ Kirigami.ApplicationWindow {
 
     component KanbanColumn: Rectangle {
         id: column
+        objectName: `statusColumn-${statusName}`
 
         required property string statusName
         required property string heading
@@ -121,6 +122,7 @@ Kirigami.ApplicationWindow {
 
             ListView {
                 id: cardList
+                objectName: `cardList-${column.statusName}`
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 model: column.cards
@@ -131,6 +133,7 @@ Kirigami.ApplicationWindow {
 
                 delegate: Controls.ItemDelegate {
                     id: card
+                    objectName: `issueCard-${issueId}`
                     required property var modelData
 
                     readonly property string issueId: String(modelData.id)
@@ -260,6 +263,7 @@ Kirigami.ApplicationWindow {
                 }
 
                 Controls.Button {
+                    objectName: "emptyCreateButton"
                     anchors.centerIn: parent
                     visible: column.showCreateWhenEmpty
                         && root.statusCount(column.statusName) === 0
@@ -274,6 +278,7 @@ Kirigami.ApplicationWindow {
 
     component CollapsibleStatusSection: Rectangle {
         id: section
+        objectName: `statusSection-${statusName}`
 
         required property string statusName
         required property string heading
@@ -317,6 +322,7 @@ Kirigami.ApplicationWindow {
 
             Controls.ToolButton {
                 id: toggleButton
+                objectName: `statusToggle-${section.statusName}`
                 Layout.fillWidth: true
                 checkable: true
                 checked: section.expanded
@@ -390,6 +396,7 @@ Kirigami.ApplicationWindow {
 
     component BeadEditorPage: Kirigami.ScrollablePage {
         id: editor
+        objectName: "editorPage"
 
         property string issueId: ""
         property bool creating: false
@@ -539,6 +546,7 @@ Kirigami.ApplicationWindow {
 
                 Controls.TextField {
                     id: titleField
+                    objectName: "titleField"
                     Kirigami.FormData.label: qsTr("Title:")
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
@@ -547,6 +555,7 @@ Kirigami.ApplicationWindow {
 
                 Controls.ComboBox {
                     id: statusField
+                    objectName: "statusField"
                     Kirigami.FormData.label: qsTr("Status:")
                     implicitWidth: editor.formFieldWidth
                     textRole: "text"
@@ -562,6 +571,7 @@ Kirigami.ApplicationWindow {
 
                 Controls.ComboBox {
                     id: priorityField
+                    objectName: "priorityField"
                     Kirigami.FormData.label: qsTr("Priority:")
                     implicitWidth: editor.formFieldWidth
                     model: ["P0 - Critical", "P1 - High", "P2 - Medium", "P3 - Low", "P4 - Backlog"]
@@ -569,6 +579,7 @@ Kirigami.ApplicationWindow {
 
                 Controls.ComboBox {
                     id: typeField
+                    objectName: "typeField"
                     Kirigami.FormData.label: qsTr("Type:")
                     implicitWidth: editor.formFieldWidth
                     editable: true
@@ -577,6 +588,7 @@ Kirigami.ApplicationWindow {
 
                 Controls.TextField {
                     id: assigneeField
+                    objectName: "assigneeField"
                     Kirigami.FormData.label: qsTr("Assignee:")
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
@@ -585,6 +597,7 @@ Kirigami.ApplicationWindow {
 
                 Controls.TextField {
                     id: labelsField
+                    objectName: "labelsField"
                     Kirigami.FormData.label: qsTr("Labels:")
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
@@ -600,6 +613,7 @@ Kirigami.ApplicationWindow {
 
                     Controls.TextArea {
                         id: descriptionField
+                        objectName: "descriptionField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Describe the work")
                     }
@@ -614,6 +628,7 @@ Kirigami.ApplicationWindow {
 
                     Controls.TextArea {
                         id: acceptanceField
+                        objectName: "acceptanceField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Acceptance criteria")
                     }
@@ -628,6 +643,7 @@ Kirigami.ApplicationWindow {
 
                     Controls.TextArea {
                         id: designField
+                        objectName: "designField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Implementation notes")
                     }
@@ -642,6 +658,7 @@ Kirigami.ApplicationWindow {
 
                     Controls.TextArea {
                         id: notesField
+                        objectName: "notesField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Additional notes")
                     }
@@ -657,11 +674,13 @@ Kirigami.ApplicationWindow {
 
     pageStack.initialPage: Kirigami.Page {
         id: boardPage
+        objectName: "boardPage"
         title: qsTr("Beads")
         padding: 0
 
         actions: [
             Kirigami.Action {
+                objectName: "createTicketAction"
                 text: qsTr("Create Ticket")
                 icon.name: "list-add"
                 enabled: !Backend.loading

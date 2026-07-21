@@ -25,8 +25,10 @@ Without a path, KDE Beads opens the current directory. Use **Open Workspace** fo
 
 ```bash
 nix develop
-cargo test
+./scripts/test
 cargo run -- /path/to/a/beads/repository
 ```
 
-The flake supplies Rust, Qt 6.10 or newer, Kirigami, the KDE Qt Quick Controls style, `kdialog`, and `bd`.
+`./scripts/test` runs the Rust suite with process-per-test isolation through `cargo-nextest`, then runs the QML interaction suite through Qt Quick Test. JUnit reports are written to `target/test-results/rust.xml` and `target/test-results/qml.xml`. `nix flake check` runs the same maintained suites in the Nix sandbox.
+
+The flake supplies Rust, Qt 6.10 or newer, Kirigami, the KDE Qt Quick Controls style, `kdialog`, `cargo-nextest`, and `bd`.
