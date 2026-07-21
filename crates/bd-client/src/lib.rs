@@ -123,6 +123,20 @@ pub struct IssueUpdate {
 }
 
 #[derive(Clone, Debug)]
+pub struct NewIssue {
+    pub title: String,
+    pub description: String,
+    pub acceptance_criteria: String,
+    pub design: String,
+    pub notes: String,
+    pub status: Status,
+    pub priority: u8,
+    pub issue_type: String,
+    pub assignee: String,
+    pub labels: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Client {
     workspace: PathBuf,
     binary: OsString,
@@ -169,6 +183,43 @@ impl Client {
     pub fn show(&self, id: &str) -> Result<Issue, Error> {
         let payload = self.run(true, &["show", id, "--json"])?;
         parse_single_issue("show", &payload)
+    }
+
+    pub fn create(&self, issue: &NewIssue) -> Result<Issue, Error> {
+        let priority = issue.priority.to_string();
+        let labels = issue.labels.join(",");
+        let args = [
+            "create",
+            issue.title.as_str(),
+            "--description",
+            issue.description.as_str(),
+            "--acceptance",
+            issue.acceptance_criteria.as_str(),
+            "--design",
+            issue.design.as_str(),
+            "--notes",
+            issue.notes.as_str(),
+            "--priority",
+            priority.as_str(),
+            "--type",
+            issue.issue_type.as_str(),
+            "--assignee",
+            issue.assignee.as_str(),
+            "--labels",
+            labels.as_str(),
+            "--json",
+        ];
+        let payload = self.run(false, &args)?;
+        let created: Issue =
+            serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+                operation: "create",
+                source,
+            })?;
+        if issue.status == Status::Open {
+            Ok(created)
+        } else {
+            self.set_status(&created.id, issue.status)
+        }
     }
 
     pub fn set_status(&self, id: &str, status: Status) -> Result<Issue, Error> {
@@ -360,6 +411,13 @@ mod tests {
         let issue = parse_single_issue("show", &format!("[{ISSUE}]")).unwrap();
         assert_eq!(issue.id, "bd-1");
         assert_eq!(issue.labels, ["kde", "rust"]);
+    }
+
+    #[test]
+    fn parses_created_issue() {
+        let issue: Issue = serde_json::from_str(ISSUE).unwrap();
+        assert_eq!(issue.id, "bd-1");
+        assert_eq!(issue.issue_type, "feature");
     }
 
     #[test]

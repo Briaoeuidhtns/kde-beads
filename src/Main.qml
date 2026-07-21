@@ -41,11 +41,21 @@ Kirigami.ApplicationWindow {
         return Kirigami.Theme.disabledTextColor;
     }
 
+    function statusCount(status) {
+        return (Backend.issues || []).filter(issue => issue.status === status).length;
+    }
+
     function openEditor(issueId) {
         if (Backend.loading)
             return;
         Backend.loadIssue(issueId);
-        pageStack.push(editorPageComponent, { "issueId": issueId });
+        pageStack.layers.push(editorPageComponent, { "issueId": issueId });
+    }
+
+    function openCreate() {
+        if (Backend.loading)
+            return;
+        pageStack.layers.push(editorPageComponent, { "creating": true });
     }
 
     component KanbanColumn: Rectangle {
@@ -54,11 +64,15 @@ Kirigami.ApplicationWindow {
         required property string statusName
         required property string heading
         required property color accent
+        property bool compactHeader: false
+        property bool showHeader: true
+        property bool showCreateWhenEmpty: false
         readonly property var cards: root.issuesForStatus(statusName)
 
         radius: Kirigami.Units.cornerRadius
-        color: Qt.alpha(accent, dropArea.containsDrag ? 0.17 : 0.055)
-        border.color: Qt.alpha(accent, dropArea.containsDrag ? 0.75 : 0.24)
+        color: dropArea.containsDrag
+            ? Qt.alpha(accent, 0.12)
+            : Kirigami.Theme.backgroundColor
 
         DropArea {
             id: dropArea
@@ -74,10 +88,11 @@ Kirigami.ApplicationWindow {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Kirigami.Units.smallSpacing
-            spacing: Kirigami.Units.smallSpacing
+            anchors.margins: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.largeSpacing
 
             RowLayout {
+                visible: column.showHeader
                 Layout.fillWidth: true
                 Layout.margins: Kirigami.Units.smallSpacing
 
@@ -89,7 +104,7 @@ Kirigami.ApplicationWindow {
                 }
                 Kirigami.Heading {
                     text: column.heading
-                    level: 3
+                    level: column.compactHeader ? 4 : 3
                     Layout.fillWidth: true
                 }
                 Controls.Label {
@@ -100,6 +115,7 @@ Kirigami.ApplicationWindow {
             }
 
             Kirigami.Separator {
+                visible: column.showHeader
                 Layout.fillWidth: true
             }
 
@@ -108,12 +124,12 @@ Kirigami.ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 model: column.cards
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Math.round(Kirigami.Units.smallSpacing / 2)
                 clip: false
                 boundsBehavior: Flickable.StopAtBounds
                 Controls.ScrollBar.vertical: Controls.ScrollBar {}
 
-                delegate: Rectangle {
+                delegate: Controls.ItemDelegate {
                     id: card
                     required property var modelData
 
@@ -123,14 +139,13 @@ Kirigami.ApplicationWindow {
                     property real restingY: 0
 
                     width: ListView.view.width
-                    implicitHeight: cardContent.implicitHeight + Kirigami.Units.largeSpacing
-                    radius: Kirigami.Units.cornerRadius
-                    color: dragArea.drag.active
-                        ? Kirigami.Theme.highlightColor
-                        : Kirigami.Theme.backgroundColor
-                    border.color: dragArea.containsMouse || dragArea.drag.active
-                        ? Kirigami.Theme.highlightColor
-                        : Qt.alpha(Kirigami.Theme.textColor, 0.16)
+                    implicitHeight: cardContent.implicitHeight + topPadding + bottomPadding
+                    leftPadding: Kirigami.Units.largeSpacing
+                    rightPadding: Kirigami.Units.largeSpacing
+                    topPadding: Kirigami.Units.largeSpacing
+                    bottomPadding: Kirigami.Units.largeSpacing
+                    hoverEnabled: true
+                    highlighted: dragArea.drag.active
                     z: dragArea.drag.active ? 100 : 1
 
                     Drag.active: dragArea.drag.active
@@ -141,11 +156,9 @@ Kirigami.ApplicationWindow {
                     Drag.hotSpot.x: width / 2
                     Drag.hotSpot.y: Kirigami.Units.gridUnit
 
-                    ColumnLayout {
+                    contentItem: ColumnLayout {
                         id: cardContent
-                        anchors.fill: parent
-                        anchors.margins: Kirigami.Units.smallSpacing
-                        spacing: 2
+                        spacing: Kirigami.Units.smallSpacing
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -246,13 +259,131 @@ Kirigami.ApplicationWindow {
                     }
                 }
 
-                Kirigami.PlaceholderMessage {
+                Controls.Button {
                     anchors.centerIn: parent
-                    width: Math.min(parent.width - Kirigami.Units.gridUnit, implicitWidth)
-                    visible: cardList.count === 0 && !Backend.loading
-                    icon.name: searchField.text.length > 0 ? "edit-find" : "view-task"
-                    text: searchField.text.length > 0 ? qsTr("No matches") : qsTr("No beads")
+                    visible: column.showCreateWhenEmpty
+                        && root.statusCount(column.statusName) === 0
+                        && !Backend.loading
+                    text: qsTr("Create ticket")
+                    icon.name: "list-add"
+                    onClicked: root.openCreate()
                 }
+            }
+        }
+    }
+
+    component CollapsibleStatusSection: Rectangle {
+        id: section
+
+        required property string statusName
+        required property string heading
+        required property color accent
+        property bool expanded: root.statusCount(statusName) > 0
+
+        implicitHeight: expanded
+            ? Kirigami.Units.gridUnit * 14
+            : toggleButton.implicitHeight + Kirigami.Units.smallSpacing * 2
+        z: 20
+        radius: Kirigami.Units.cornerRadius
+        color: sectionDropArea.containsDrag
+            ? Qt.alpha(accent, 0.12)
+            : Kirigami.Theme.alternateBackgroundColor
+        clip: true
+
+        Behavior on implicitHeight {
+            NumberAnimation {
+                duration: Kirigami.Units.shortDuration
+                easing.type: Easing.InOutQuad
+            }
+        }
+
+        DropArea {
+            id: sectionDropArea
+            anchors.fill: parent
+            z: 10
+            keys: ["bead-card"]
+
+            onDropped: drop => {
+                if (drop.source.issueStatus !== section.statusName)
+                    Backend.moveIssue(drop.source.issueId, section.statusName);
+                drop.acceptProposedAction();
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Kirigami.Units.smallSpacing
+            spacing: Kirigami.Units.smallSpacing
+
+            Controls.ToolButton {
+                id: toggleButton
+                Layout.fillWidth: true
+                checkable: true
+                checked: section.expanded
+                onClicked: section.expanded = checked
+
+                contentItem: RowLayout {
+                    Kirigami.Icon {
+                        source: toggleButton.checked ? "arrow-down" : "arrow-right"
+                        implicitWidth: Kirigami.Units.iconSizes.small
+                        implicitHeight: implicitWidth
+                    }
+                    Controls.Label {
+                        text: section.heading
+                        font.weight: Font.DemiBold
+                        Layout.fillWidth: true
+                    }
+                    Controls.Label {
+                        text: root.statusCount(section.statusName)
+                        color: section.accent
+                        font.weight: Font.Bold
+                    }
+                }
+            }
+
+            KanbanColumn {
+                visible: section.expanded
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                statusName: section.statusName
+                heading: section.heading
+                accent: section.accent
+                showHeader: false
+            }
+        }
+    }
+
+    component OpenColumn: Rectangle {
+        radius: Kirigami.Units.cornerRadius
+        color: Kirigami.Theme.backgroundColor
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Kirigami.Units.smallSpacing
+
+            KanbanColumn {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                statusName: "open"
+                heading: qsTr("Open")
+                accent: Kirigami.Theme.positiveTextColor
+                showCreateWhenEmpty: true
+            }
+
+            CollapsibleStatusSection {
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                statusName: "blocked"
+                heading: qsTr("Blocked")
+                accent: Kirigami.Theme.negativeTextColor
+            }
+
+            CollapsibleStatusSection {
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                statusName: "deferred"
+                heading: qsTr("Deferred")
+                accent: Kirigami.Theme.neutralTextColor
             }
         }
     }
@@ -260,9 +391,19 @@ Kirigami.ApplicationWindow {
     component BeadEditorPage: Kirigami.ScrollablePage {
         id: editor
 
-        required property string issueId
+        property string issueId: ""
+        property bool creating: false
+        readonly property real formFieldWidth: Math.max(
+            Kirigami.Units.gridUnit * 16,
+            Math.min(
+                Kirigami.Units.gridUnit * 40,
+                editor.availableWidth - Kirigami.Units.gridUnit * 8
+            )
+        )
 
-        title: titleField.text.length > 0 ? titleField.text : issueId
+        title: creating
+            ? qsTr("Create ticket")
+            : (titleField.text.length > 0 ? titleField.text : issueId)
 
         function statusIndex(status) {
             const statuses = ["open", "in_progress", "blocked", "deferred", "closed"];
@@ -270,6 +411,8 @@ Kirigami.ApplicationWindow {
         }
 
         function populate() {
+            if (creating)
+                return;
             const issue = Backend.detail || {};
             if (String(issue.id || "") !== issueId)
                 return;
@@ -285,8 +428,16 @@ Kirigami.ApplicationWindow {
             labelsField.text = issue.labels ? issue.labels.join(", ") : "";
         }
 
+        function initializeCreate() {
+            statusField.currentIndex = 0;
+            priorityField.currentIndex = 2;
+            typeField.currentIndex = 2;
+            typeField.editText = "task";
+            titleField.forceActiveFocus();
+        }
+
         function save() {
-            Backend.saveIssue({
+            const request = {
                 "id": issueId,
                 "title": titleField.text,
                 "description": descriptionField.text,
@@ -298,22 +449,35 @@ Kirigami.ApplicationWindow {
                 "issueType": typeField.editText,
                 "assignee": assigneeField.text,
                 "labels": labelsField.text
-            });
+            };
+            if (creating)
+                Backend.createIssue(request);
+            else
+                Backend.saveIssue(request);
         }
 
         actions: [
             Kirigami.Action {
-                text: qsTr("Save")
-                icon.name: "document-save"
+                text: editor.creating ? qsTr("Create") : qsTr("Save")
+                icon.name: editor.creating ? "list-add" : "document-save"
                 enabled: !Backend.loading && titleField.text.trim().length > 0
                 shortcut: StandardKey.Save
                 onTriggered: editor.save()
             }
         ]
 
+        Shortcut {
+            sequence: "Escape"
+            onActivated: root.pageStack.layers.pop()
+        }
+
         Component.onCompleted: {
-            editor.populate();
-            Backend.loadIssue(issueId);
+            if (editor.creating)
+                editor.initializeCreate();
+            else {
+                editor.populate();
+                Backend.loadIssue(issueId);
+            }
         }
 
         Connections {
@@ -330,8 +494,8 @@ Kirigami.ApplicationWindow {
             }
 
             function onIssueSaved(savedId) {
-                if (savedId === editor.issueId)
-                    root.pageStack.pop();
+                if (editor.creating || savedId === editor.issueId)
+                    root.pageStack.layers.pop();
             }
         }
 
@@ -355,7 +519,7 @@ Kirigami.ApplicationWindow {
                 Layout.fillWidth: true
 
                 Controls.Label {
-                    text: editor.issueId
+                    text: editor.creating ? qsTr("New bead") : editor.issueId
                     color: Kirigami.Theme.highlightColor
                     font.family: "monospace"
                     font.weight: Font.Bold
@@ -376,6 +540,7 @@ Kirigami.ApplicationWindow {
                 Controls.TextField {
                     id: titleField
                     Kirigami.FormData.label: qsTr("Title:")
+                    implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     placeholderText: qsTr("Issue title")
                 }
@@ -383,6 +548,7 @@ Kirigami.ApplicationWindow {
                 Controls.ComboBox {
                     id: statusField
                     Kirigami.FormData.label: qsTr("Status:")
+                    implicitWidth: editor.formFieldWidth
                     textRole: "text"
                     valueRole: "value"
                     model: [
@@ -397,12 +563,14 @@ Kirigami.ApplicationWindow {
                 Controls.ComboBox {
                     id: priorityField
                     Kirigami.FormData.label: qsTr("Priority:")
+                    implicitWidth: editor.formFieldWidth
                     model: ["P0 - Critical", "P1 - High", "P2 - Medium", "P3 - Low", "P4 - Backlog"]
                 }
 
                 Controls.ComboBox {
                     id: typeField
                     Kirigami.FormData.label: qsTr("Type:")
+                    implicitWidth: editor.formFieldWidth
                     editable: true
                     model: ["bug", "feature", "task", "epic", "chore", "decision"]
                 }
@@ -410,6 +578,7 @@ Kirigami.ApplicationWindow {
                 Controls.TextField {
                     id: assigneeField
                     Kirigami.FormData.label: qsTr("Assignee:")
+                    implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     placeholderText: qsTr("Unassigned")
                 }
@@ -417,14 +586,17 @@ Kirigami.ApplicationWindow {
                 Controls.TextField {
                     id: labelsField
                     Kirigami.FormData.label: qsTr("Labels:")
+                    implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     placeholderText: qsTr("Comma-separated labels")
                 }
 
                 Controls.ScrollView {
                     Kirigami.FormData.label: qsTr("Description:")
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
+                    implicitWidth: editor.formFieldWidth
+                    implicitHeight: Kirigami.Units.gridUnit * 8
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.gridUnit * 7
 
                     Controls.TextArea {
                         id: descriptionField
@@ -435,8 +607,10 @@ Kirigami.ApplicationWindow {
 
                 Controls.ScrollView {
                     Kirigami.FormData.label: qsTr("Acceptance:")
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
+                    implicitWidth: editor.formFieldWidth
+                    implicitHeight: Kirigami.Units.gridUnit * 6
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.gridUnit * 5
 
                     Controls.TextArea {
                         id: acceptanceField
@@ -447,8 +621,10 @@ Kirigami.ApplicationWindow {
 
                 Controls.ScrollView {
                     Kirigami.FormData.label: qsTr("Design:")
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
+                    implicitWidth: editor.formFieldWidth
+                    implicitHeight: Kirigami.Units.gridUnit * 6
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.gridUnit * 5
 
                     Controls.TextArea {
                         id: designField
@@ -459,8 +635,10 @@ Kirigami.ApplicationWindow {
 
                 Controls.ScrollView {
                     Kirigami.FormData.label: qsTr("Notes:")
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
+                    implicitWidth: editor.formFieldWidth
+                    implicitHeight: Kirigami.Units.gridUnit * 6
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.gridUnit * 5
 
                     Controls.TextArea {
                         id: notesField
@@ -483,6 +661,13 @@ Kirigami.ApplicationWindow {
         padding: 0
 
         actions: [
+            Kirigami.Action {
+                text: qsTr("Create Ticket")
+                icon.name: "list-add"
+                enabled: !Backend.loading
+                shortcut: "Ctrl+N"
+                onTriggered: root.openCreate()
+            },
             Kirigami.Action {
                 text: qsTr("Open Workspace")
                 icon.name: "folder-open"
@@ -593,42 +778,26 @@ Kirigami.ApplicationWindow {
                 Row {
                     id: boardRow
                     height: boardFlick.height - Kirigami.Units.gridUnit
-                    spacing: Kirigami.Units.smallSpacing
-                    readonly property real columnWidth: Math.max(
-                        Kirigami.Units.gridUnit * 13,
-                        (boardFlick.width - spacing * 4) / 5
+                    spacing: Kirigami.Units.largeSpacing
+                    readonly property real compactWidth: Kirigami.Units.gridUnit * 16
+                    readonly property real focusWidth: Math.max(
+                        Kirigami.Units.gridUnit * 20,
+                        (boardFlick.width - compactWidth - spacing * 2) / 2
                     )
 
-                    KanbanColumn {
-                        width: boardRow.columnWidth
+                    OpenColumn {
+                        width: boardRow.focusWidth
                         height: boardRow.height
-                        statusName: "open"
-                        heading: qsTr("Open")
-                        accent: Kirigami.Theme.positiveTextColor
                     }
                     KanbanColumn {
-                        width: boardRow.columnWidth
+                        width: boardRow.focusWidth
                         height: boardRow.height
                         statusName: "in_progress"
                         heading: qsTr("In progress")
                         accent: Kirigami.Theme.highlightColor
                     }
                     KanbanColumn {
-                        width: boardRow.columnWidth
-                        height: boardRow.height
-                        statusName: "blocked"
-                        heading: qsTr("Blocked")
-                        accent: Kirigami.Theme.negativeTextColor
-                    }
-                    KanbanColumn {
-                        width: boardRow.columnWidth
-                        height: boardRow.height
-                        statusName: "deferred"
-                        heading: qsTr("Deferred")
-                        accent: Kirigami.Theme.neutralTextColor
-                    }
-                    KanbanColumn {
-                        width: boardRow.columnWidth
+                        width: boardRow.compactWidth
                         height: boardRow.height
                         statusName: "closed"
                         heading: qsTr("Closed")

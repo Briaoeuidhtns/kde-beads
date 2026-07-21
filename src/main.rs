@@ -6,7 +6,7 @@ use std::process::Command;
 use std::str::FromStr;
 use std::thread;
 
-use bd_client::{Client, Issue, IssueUpdate, Status};
+use bd_client::{Client, Issue, IssueUpdate, NewIssue, Status};
 use qtbridge::{QApp, QObjectHolder, invoke_method, qobject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -156,6 +156,30 @@ impl Backend {
     }
 
     #[qslot]
+    fn create_issue(&mut self, request: Value) {
+        if self.loading {
+            return;
+        }
+        let issue = match new_issue_from_value(request) {
+            Ok(issue) => issue,
+            Err(error) => {
+                self.set_error(error);
+                return;
+            }
+        };
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = mutate_and_list(workspace, |client| client.create(&issue));
+            let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishCreateIssue", payload, error);
+        });
+    }
+
+    #[qslot]
     fn choose_workspace(&mut self) {
         if self.loading {
             return;
@@ -210,13 +234,20 @@ impl Backend {
 
     #[qslot(qml_name = "finishMoveIssue")]
     fn finish_move_issue(&mut self, payload: String, error: String) {
-        self.finish_mutation(payload, error);
+        let _ = self.finish_mutation(payload, error);
     }
 
     #[qslot(qml_name = "finishSaveIssue")]
     fn finish_save_issue(&mut self, payload: String, error: String, saved_id: String) {
-        if self.finish_mutation(payload, error) {
+        if self.finish_mutation(payload, error).is_some() {
             self.issue_saved(&saved_id);
+        }
+    }
+
+    #[qslot(qml_name = "finishCreateIssue")]
+    fn finish_create_issue(&mut self, payload: String, error: String) {
+        if let Some(created_id) = self.finish_mutation(payload, error) {
+            self.issue_saved(&created_id);
         }
     }
 
@@ -248,15 +279,16 @@ impl Backend {
         }
     }
 
-    fn finish_mutation(&mut self, payload: String, error: String) -> bool {
+    fn finish_mutation(&mut self, payload: String, error: String) -> Option<String> {
         if !error.is_empty() {
             self.set_error(error);
             self.set_loading(false);
-            return false;
+            return None;
         }
 
         match serde_json::from_str::<MutationResult>(&payload) {
             Ok(result) => {
+                let issue_id = result.issue.id.clone();
                 match serde_json::to_value(&result.issue) {
                     Ok(detail) => {
                         self.detail = detail;
@@ -265,7 +297,7 @@ impl Backend {
                     Err(error) => {
                         self.set_error(format!("Could not encode updated issue: {error}"));
                         self.set_loading(false);
-                        return false;
+                        return None;
                     }
                 }
                 match issues_to_values(result.issues) {
@@ -276,16 +308,16 @@ impl Backend {
                     Err(error) => {
                         self.set_error(error);
                         self.set_loading(false);
-                        return false;
+                        return None;
                     }
                 }
                 self.set_loading(false);
-                true
+                Some(issue_id)
             }
             Err(error) => {
                 self.set_error(format!("Could not decode updated issues: {error}"));
                 self.set_loading(false);
-                false
+                None
             }
         }
     }
@@ -307,6 +339,7 @@ impl Backend {
 
 #[derive(Deserialize)]
 struct EditorRequest {
+    #[serde(default)]
     id: String,
     title: String,
     description: String,
@@ -329,11 +362,45 @@ struct MutationResult {
 }
 
 fn issue_update_from_value(value: Value) -> Result<IssueUpdate, String> {
-    let request: EditorRequest =
-        serde_json::from_value(value).map_err(|error| format!("Invalid editor values: {error}"))?;
+    let (request, status, priority, labels) = parse_editor_request(value)?;
     if request.id.trim().is_empty() {
         return Err("Cannot save an issue without an ID".to_string());
     }
+
+    Ok(IssueUpdate {
+        id: request.id,
+        title: request.title,
+        description: request.description,
+        acceptance_criteria: request.acceptance_criteria,
+        design: request.design,
+        notes: request.notes,
+        status,
+        priority,
+        issue_type: request.issue_type,
+        assignee: request.assignee,
+        labels,
+    })
+}
+
+fn new_issue_from_value(value: Value) -> Result<NewIssue, String> {
+    let (request, status, priority, labels) = parse_editor_request(value)?;
+    Ok(NewIssue {
+        title: request.title,
+        description: request.description,
+        acceptance_criteria: request.acceptance_criteria,
+        design: request.design,
+        notes: request.notes,
+        status,
+        priority,
+        issue_type: request.issue_type,
+        assignee: request.assignee,
+        labels,
+    })
+}
+
+fn parse_editor_request(value: Value) -> Result<(EditorRequest, Status, u8, Vec<String>), String> {
+    let request: EditorRequest =
+        serde_json::from_value(value).map_err(|error| format!("Invalid editor values: {error}"))?;
     if request.title.trim().is_empty() {
         return Err("Title cannot be empty".to_string());
     }
@@ -352,20 +419,7 @@ fn issue_update_from_value(value: Value) -> Result<IssueUpdate, String> {
         .filter(|label| !label.is_empty())
         .map(str::to_string)
         .collect();
-
-    Ok(IssueUpdate {
-        id: request.id,
-        title: request.title,
-        description: request.description,
-        acceptance_criteria: request.acceptance_criteria,
-        design: request.design,
-        notes: request.notes,
-        status,
-        priority,
-        issue_type: request.issue_type,
-        assignee: request.assignee,
-        labels,
-    })
+    Ok((request, status, priority, labels))
 }
 
 fn mutate_and_list(
@@ -507,5 +561,26 @@ mod tests {
             issue_update_from_value(request).unwrap_err(),
             "Title cannot be empty"
         );
+    }
+
+    #[test]
+    fn converts_editor_request_to_new_issue() {
+        let request = json!({
+            "title": "New bead",
+            "description": "Description",
+            "acceptanceCriteria": "It works",
+            "design": "Use the CLI",
+            "notes": "",
+            "status": "open",
+            "priority": "2",
+            "issueType": "task",
+            "assignee": "",
+            "labels": "kde, rust"
+        });
+
+        let issue = new_issue_from_value(request).unwrap();
+        assert_eq!(issue.title, "New bead");
+        assert_eq!(issue.status, Status::Open);
+        assert_eq!(issue.labels, ["kde", "rust"]);
     }
 }

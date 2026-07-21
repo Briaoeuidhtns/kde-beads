@@ -7,6 +7,7 @@ The application never opens Beads storage directly. The `bd-client` workspace cr
 ```text
 bd --readonly list --json --all --limit 0
 bd --readonly show <id> --json
+bd create <title> ... --json
 bd update <id> ... --json
 ```
 
@@ -18,7 +19,7 @@ All build and runtime dependencies are provided by the Nix flake.
 nix run . -- /path/to/a/beads/repository
 ```
 
-Without a path, KDE Beads opens the current directory. Use **Open Workspace** for KDE's native folder picker. Drag cards between status columns or click one to open its editor.
+Without a path, KDE Beads opens the current directory. Use **Open Workspace** for KDE's native folder picker. Create tickets from the toolbar, drag cards between statuses, or click one to open its editor.
 
 ## Develop
 
