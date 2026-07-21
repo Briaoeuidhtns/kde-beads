@@ -16,6 +16,7 @@ QtObject {
     property int moveIssueCallCount: 0
     property int saveIssueCallCount: 0
     property int createIssueCallCount: 0
+    property int addDependencyCallCount: 0
     property int addAttachmentCallCount: 0
     property int openAttachmentCallCount: 0
     property int removeAttachmentCallCount: 0
@@ -25,6 +26,9 @@ QtObject {
     property string lastMovedStatus: ""
     property var lastSavedRequest: ({})
     property var lastCreatedRequest: ({})
+    property string lastDependencyIssueId: ""
+    property string lastDependsOnId: ""
+    property string lastDependencyType: ""
     property string lastAttachmentIssueId: ""
     property string lastAttachmentId: ""
 
@@ -42,6 +46,7 @@ QtObject {
         moveIssueCallCount = 0;
         saveIssueCallCount = 0;
         createIssueCallCount = 0;
+        addDependencyCallCount = 0;
         addAttachmentCallCount = 0;
         openAttachmentCallCount = 0;
         removeAttachmentCallCount = 0;
@@ -51,6 +56,9 @@ QtObject {
         lastMovedStatus = "";
         lastSavedRequest = {};
         lastCreatedRequest = {};
+        lastDependencyIssueId = "";
+        lastDependsOnId = "";
+        lastDependencyType = "";
         lastAttachmentIssueId = "";
         lastAttachmentId = "";
     }
@@ -78,6 +86,13 @@ QtObject {
     function createIssue(request) {
         createIssueCallCount += 1;
         lastCreatedRequest = request;
+    }
+
+    function addDependency(issueId, dependsOnId, dependencyType) {
+        addDependencyCallCount += 1;
+        lastDependencyIssueId = issueId;
+        lastDependsOnId = dependsOnId;
+        lastDependencyType = dependencyType;
     }
 
     function addAttachment(issueId) {

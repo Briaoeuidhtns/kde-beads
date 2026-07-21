@@ -62,6 +62,21 @@ pub struct Issue {
     pub polyfill_attachment_count: usize,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LinkedIssue {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default = "default_priority")]
+    pub priority: u8,
+    #[serde(default = "default_issue_type")]
+    pub issue_type: String,
+    #[serde(default)]
+    pub dependency_type: String,
+}
+
 fn default_priority() -> u8 {
     2
 }
@@ -134,6 +149,7 @@ pub struct IssueUpdate {
     pub issue_type: String,
     pub assignee: String,
     pub labels: Vec<String>,
+    pub parent: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +164,7 @@ pub struct NewIssue {
     pub issue_type: String,
     pub assignee: String,
     pub labels: Vec<String>,
+    pub parent: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -200,6 +217,14 @@ impl Client {
         Ok(issue)
     }
 
+    pub fn dependencies(&self, id: &str) -> Result<Vec<LinkedIssue>, Error> {
+        self.relationships(id, "down")
+    }
+
+    pub fn dependents(&self, id: &str) -> Result<Vec<LinkedIssue>, Error> {
+        self.relationships(id, "up")
+    }
+
     fn show_raw(&self, id: &str) -> Result<Issue, Error> {
         let payload = self.run(true, &["show", id, "--json"])?;
         parse_single_issue("show", &payload)
@@ -208,7 +233,7 @@ impl Client {
     pub fn create(&self, issue: &NewIssue) -> Result<Issue, Error> {
         let priority = issue.priority.to_string();
         let labels = issue.labels.join(",");
-        let args = [
+        let mut args = vec![
             "create",
             issue.title.as_str(),
             "--description",
@@ -227,8 +252,11 @@ impl Client {
             issue.assignee.as_str(),
             "--labels",
             labels.as_str(),
-            "--json",
         ];
+        if let Some(parent) = issue.parent.as_deref() {
+            args.extend(["--parent", parent]);
+        }
+        args.push("--json");
         let payload = self.run(false, &args)?;
         let created: Issue =
             serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
@@ -253,7 +281,7 @@ impl Client {
     pub fn update(&self, update: &IssueUpdate) -> Result<Issue, Error> {
         let priority = update.priority.to_string();
         let labels = update.labels.join(",");
-        let args = [
+        let mut args = vec![
             "update",
             update.id.as_str(),
             "--title",
@@ -277,10 +305,45 @@ impl Client {
             update.assignee.as_str(),
             "--set-labels",
             labels.as_str(),
-            "--json",
         ];
+        if let Some(parent) = update.parent.as_deref() {
+            args.extend(["--parent", parent]);
+        }
+        args.push("--json");
         let payload = self.run(false, &args)?;
         parse_single_issue("update", &payload)
+    }
+
+    pub fn add_dependency(
+        &self,
+        issue_id: &str,
+        depends_on_id: &str,
+        dependency_type: &str,
+    ) -> Result<(), Error> {
+        self.run(
+            false,
+            &[
+                "dep",
+                "add",
+                issue_id,
+                depends_on_id,
+                "--type",
+                dependency_type,
+                "--json",
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn relationships(&self, id: &str, direction: &str) -> Result<Vec<LinkedIssue>, Error> {
+        let payload = self.run(
+            true,
+            &["dep", "list", id, "--direction", direction, "--json"],
+        )?;
+        serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+            operation: "dep list",
+            source,
+        })
     }
 
     fn run(&self, readonly: bool, args: &[&str]) -> Result<String, Error> {

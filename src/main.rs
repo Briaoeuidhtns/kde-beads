@@ -6,7 +6,7 @@ use std::process::Command;
 use std::str::FromStr;
 use std::thread;
 
-use bd_client::{Client, Issue, IssueUpdate, NewIssue, Status};
+use bd_client::{Client, Issue, IssueUpdate, LinkedIssue, NewIssue, Status};
 use qtbridge::{QApp, QObjectHolder, invoke_method, qobject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -105,7 +105,7 @@ impl Backend {
         let workspace = self.workspace.clone();
         let invoker = self.get_qml_method_invoker();
         thread::spawn(move || {
-            let result = Client::new(workspace).and_then(|client| client.show(&id));
+            let result = Client::new(workspace).and_then(|client| load_issue_detail(&client, &id));
             let (payload, error) = encode_result(result);
             invoke_method!(invoker, "finishLoadIssue", payload, error);
         });
@@ -281,6 +281,38 @@ impl Backend {
     }
 
     #[qslot]
+    fn add_dependency(&mut self, issue_id: String, depends_on_id: String, dependency_type: String) {
+        if self.loading {
+            return;
+        }
+        let issue_id = issue_id.trim().to_string();
+        let depends_on_id = depends_on_id.trim().to_string();
+        if issue_id.is_empty() || depends_on_id.is_empty() {
+            self.set_error("Both relationship issue IDs are required".to_string());
+            return;
+        }
+        if issue_id == depends_on_id {
+            self.set_error("An issue cannot depend on itself".to_string());
+            return;
+        }
+        if !matches!(dependency_type.as_str(), "blocks" | "parent-child") {
+            self.set_error(format!("Unsupported relationship type: {dependency_type}"));
+            return;
+        }
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result =
+                add_dependency_and_list(workspace, &issue_id, &depends_on_id, &dependency_type);
+            let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishAddDependency", payload, error);
+        });
+    }
+
+    #[qslot]
     fn choose_workspace(&mut self) {
         if self.loading {
             return;
@@ -407,6 +439,40 @@ impl Backend {
         self.set_loading(false);
     }
 
+    #[qslot(qml_name = "finishAddDependency")]
+    fn finish_add_dependency(&mut self, payload: String, error: String) {
+        if !error.is_empty() {
+            self.set_error(error);
+            self.set_loading(false);
+            return;
+        }
+
+        match serde_json::from_str::<DetailMutationResult>(&payload) {
+            Ok(result) => {
+                match serde_json::to_value(result.detail) {
+                    Ok(detail) => {
+                        self.detail = detail;
+                        self.detail_changed();
+                    }
+                    Err(error) => {
+                        self.set_error(format!("Could not encode updated relationships: {error}"))
+                    }
+                }
+                match issues_to_values(result.issues) {
+                    Ok(issues) => {
+                        self.issues = issues;
+                        self.issues_changed();
+                    }
+                    Err(error) => self.set_error(error),
+                }
+            }
+            Err(error) => {
+                self.set_error(format!("Could not decode updated relationships: {error}"));
+            }
+        }
+        self.set_loading(false);
+    }
+
     #[qslot(qml_name = "finishChooseWorkspace")]
     fn finish_choose_workspace(&mut self, workspace: String, error: String) {
         self.set_loading(false);
@@ -517,11 +583,27 @@ struct EditorRequest {
     issue_type: String,
     assignee: String,
     labels: String,
+    #[serde(default, rename = "parentId")]
+    parent_id: String,
 }
 
 #[derive(Deserialize, Serialize)]
 struct MutationResult {
     issue: Issue,
+    issues: Vec<Issue>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct IssueDetail {
+    #[serde(flatten)]
+    issue: Issue,
+    dependencies: Vec<LinkedIssue>,
+    dependents: Vec<LinkedIssue>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct DetailMutationResult {
+    detail: IssueDetail,
     issues: Vec<Issue>,
 }
 
@@ -543,6 +625,7 @@ fn issue_update_from_value(value: Value) -> Result<IssueUpdate, String> {
         issue_type: request.issue_type,
         assignee: request.assignee,
         labels,
+        parent: (!request.parent_id.trim().is_empty()).then_some(request.parent_id),
     })
 }
 
@@ -559,6 +642,7 @@ fn new_issue_from_value(value: Value) -> Result<NewIssue, String> {
         issue_type: request.issue_type,
         assignee: request.assignee,
         labels,
+        parent: (!request.parent_id.trim().is_empty()).then_some(request.parent_id),
     })
 }
 
@@ -594,6 +678,27 @@ fn mutate_and_list(
     let issue = mutate(&client)?;
     let issues = client.list()?;
     Ok(MutationResult { issue, issues })
+}
+
+fn load_issue_detail(client: &Client, id: &str) -> Result<IssueDetail, bd_client::Error> {
+    Ok(IssueDetail {
+        issue: client.show(id)?,
+        dependencies: client.dependencies(id)?,
+        dependents: client.dependents(id)?,
+    })
+}
+
+fn add_dependency_and_list(
+    workspace: String,
+    issue_id: &str,
+    depends_on_id: &str,
+    dependency_type: &str,
+) -> Result<DetailMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    client.add_dependency(issue_id, depends_on_id, dependency_type)?;
+    let detail = load_issue_detail(&client, issue_id)?;
+    let issues = client.list()?;
+    Ok(DetailMutationResult { detail, issues })
 }
 
 fn choose_workspace_with_kdialog(current_workspace: &str) -> (String, String) {
@@ -777,12 +882,14 @@ mod tests {
             "priority": "2",
             "issueType": "task",
             "assignee": "",
-            "labels": "kde, rust"
+            "labels": "kde, rust",
+            "parentId": "bd-epic"
         });
 
         let issue = new_issue_from_value(request).unwrap();
         assert_eq!(issue.title, "New bead");
         assert_eq!(issue.status, Status::Open);
         assert_eq!(issue.labels, ["kde", "rust"]);
+        assert_eq!(issue.parent.as_deref(), Some("bd-epic"));
     }
 }

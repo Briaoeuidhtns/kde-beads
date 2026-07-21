@@ -65,6 +65,85 @@ Item {
             compare(Backend.lastCreatedRequest.labels, "qml, kde");
             compare(Backend.lastCreatedRequest.status, "open");
             compare(Backend.lastCreatedRequest.priority, "2");
+            compare(Backend.lastCreatedRequest.parentId, "");
+        }
+
+        function test_child_editor_submits_epic_parent() {
+            createApp();
+            app.openCreate("test-epic");
+            tryVerify(() => findChild(app, "editorPage") !== null);
+            const editor = findChild(app, "editorPage");
+            findChild(editor, "titleField").text = "Epic child";
+
+            editor.save();
+
+            compare(Backend.createIssueCallCount, 1);
+            compare(Backend.lastCreatedRequest.parentId, "test-epic");
+        }
+
+        function test_existing_issue_adds_relationship() {
+            Backend.detail = {
+                "id": "test-existing",
+                "title": "Existing issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "dependencies": [],
+                "dependents": []
+            };
+            createApp();
+            app.openEditor("test-existing");
+            tryVerify(() => findChild(app, "editorPage") !== null);
+            const editor = findChild(app, "editorPage");
+            findChild(editor, "relationshipTargetField").text = "test-blocker";
+
+            editor.addRelationship();
+
+            compare(Backend.addDependencyCallCount, 1);
+            compare(Backend.lastDependencyIssueId, "test-existing");
+            compare(Backend.lastDependsOnId, "test-blocker");
+            compare(Backend.lastDependencyType, "blocks");
+        }
+
+        function test_back_from_linked_issue_retains_parent_detail() {
+            Backend.detail = {
+                "id": "test-parent",
+                "title": "Parent issue",
+                "status": "open",
+                "priority": 1,
+                "issue_type": "epic",
+                "labels": [],
+                "dependencies": [],
+                "dependents": [{
+                    "id": "test-child",
+                    "title": "Child issue",
+                    "dependency_type": "parent-child"
+                }]
+            };
+            createApp();
+            app.openEditor("test-parent");
+            tryCompare(Backend, "lastLoadedId", "test-parent");
+            const parentEditor = findChild(app, "editorPage");
+            compare(parentEditor.dependents.length, 1);
+            app.openEditor("test-child");
+            tryCompare(Backend, "lastLoadedId", "test-child");
+            Backend.detail = {
+                "id": "test-child",
+                "title": "Child issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "dependencies": [],
+                "dependents": []
+            };
+
+            app.pageStack.layers.pop();
+
+            compare(Backend.lastLoadedId, "test-child");
+            compare(Backend.loadIssueCallCount, 2);
+            compare(parentEditor.dependents.length, 1);
         }
 
         function test_escape_closes_editor() {

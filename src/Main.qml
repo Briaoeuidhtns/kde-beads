@@ -77,10 +77,13 @@ Kirigami.ApplicationWindow {
         pageStack.layers.push(editorPageComponent, { "issueId": issueId });
     }
 
-    function openCreate() {
+    function openCreate(parentId) {
         if (Backend.loading)
             return;
-        pageStack.layers.push(editorPageComponent, { "creating": true });
+        pageStack.layers.push(editorPageComponent, {
+            "creating": true,
+            "parentId": String(parentId || "")
+        });
     }
 
     component KanbanColumn: Rectangle {
@@ -425,7 +428,14 @@ Kirigami.ApplicationWindow {
 
         property string issueId: ""
         property bool creating: false
+        property string parentId: ""
         property bool preserveFieldsWhileLoading: false
+        property bool detailLoadRequested: false
+        property bool detailReady: false
+        property var localDetail: ({})
+        readonly property var relationshipDetail: localDetail
+        readonly property var dependencies: relationshipDetail.dependencies || []
+        readonly property var dependents: relationshipDetail.dependents || []
         readonly property real formFieldWidth: Math.max(
             Kirigami.Units.gridUnit * 16,
             Math.min(
@@ -446,7 +456,7 @@ Kirigami.ApplicationWindow {
         function populate() {
             if (creating)
                 return;
-            const issue = Backend.detail || {};
+            const issue = localDetail || {};
             if (String(issue.id || "") !== issueId)
                 return;
             titleField.text = issue.title || "";
@@ -469,6 +479,32 @@ Kirigami.ApplicationWindow {
             titleField.forceActiveFocus();
         }
 
+        function relationshipLabel(relation, incoming) {
+            if (relation.dependency_type === "parent-child")
+                return incoming ? qsTr("Child") : qsTr("Parent epic");
+            if (relation.dependency_type === "blocks")
+                return incoming ? qsTr("Blocks") : qsTr("Blocked by");
+            return incoming ? qsTr("Dependent") : qsTr("Depends on");
+        }
+
+        function addRelationship() {
+            const targetId = relationshipTargetField.text.trim();
+            if (targetId.length === 0 || targetId === issueId)
+                return;
+            preserveFieldsWhileLoading = true;
+            Backend.addDependency(issueId, targetId, relationshipTypeField.currentValue);
+            relationshipTargetField.clear();
+        }
+
+        function requestDetail() {
+            if (creating || Backend.loading || detailLoadRequested)
+                return false;
+            detailLoadRequested = true;
+            detailReady = false;
+            Backend.loadIssue(issueId);
+            return true;
+        }
+
         function save() {
             const request = {
                 "id": issueId,
@@ -481,7 +517,8 @@ Kirigami.ApplicationWindow {
                 "priority": String(priorityField.currentIndex),
                 "issueType": typeField.editText,
                 "assignee": assigneeField.text,
-                "labels": labelsField.text
+                "labels": labelsField.text,
+                "parentId": parentId
             };
             if (creating)
                 Backend.createIssue(request);
@@ -496,6 +533,14 @@ Kirigami.ApplicationWindow {
                 enabled: !Backend.loading && titleField.text.trim().length > 0
                 shortcut: StandardKey.Save
                 onTriggered: editor.save()
+            },
+            Kirigami.Action {
+                objectName: "createChildAction"
+                text: qsTr("Create child ticket")
+                icon.name: "list-add"
+                visible: !editor.creating && typeField.editText === "epic"
+                enabled: !Backend.loading
+                onTriggered: root.openCreate(editor.issueId)
             }
         ]
 
@@ -508,8 +553,10 @@ Kirigami.ApplicationWindow {
             if (editor.creating)
                 editor.initializeCreate();
             else {
+                if (String(Backend.detail.id || "") === editor.issueId)
+                    editor.localDetail = Backend.detail;
                 editor.populate();
-                Backend.loadIssue(issueId);
+                editor.requestDetail();
             }
         }
 
@@ -523,12 +570,23 @@ Kirigami.ApplicationWindow {
             }
 
             function onDetailChanged() {
-                if (!Backend.loading)
+                if (String(Backend.detail.id || "") !== editor.issueId)
+                    return;
+                editor.localDetail = Backend.detail;
+                if (!Backend.loading) {
                     editor.populate();
+                    if (!editor.detailLoadRequested)
+                        editor.detailReady = true;
+                }
             }
 
             function onLoadingChanged() {
                 if (!Backend.loading) {
+                    if (String(Backend.detail.id || "") === editor.issueId) {
+                        editor.localDetail = Backend.detail;
+                        editor.detailReady = true;
+                    }
+                    editor.detailLoadRequested = false;
                     if (editor.preserveFieldsWhileLoading)
                         editor.preserveFieldsWhileLoading = false;
                     else
@@ -539,6 +597,8 @@ Kirigami.ApplicationWindow {
             function onIssueSaved(savedId) {
                 if (editor.creating || savedId === editor.issueId)
                     root.pageStack.layers.pop();
+                else
+                    Backend.loadIssue(editor.issueId);
             }
         }
 
@@ -567,6 +627,12 @@ Kirigami.ApplicationWindow {
                     font.family: "monospace"
                     font.weight: Font.Bold
                 }
+                Controls.Label {
+                    visible: editor.creating && editor.parentId.length > 0
+                    text: qsTr("Child of %1").arg(editor.parentId)
+                    color: Kirigami.Theme.disabledTextColor
+                    font.family: "monospace"
+                }
                 Item { Layout.fillWidth: true }
                 Controls.BusyIndicator {
                     running: Backend.loading
@@ -578,7 +644,7 @@ Kirigami.ApplicationWindow {
 
             Kirigami.FormLayout {
                 Layout.fillWidth: true
-                enabled: !Backend.loading
+                enabled: !Backend.loading || editor.detailLoadRequested
 
                 Controls.TextField {
                     id: titleField
@@ -652,8 +718,8 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         objectName: "attachmentsRepeater"
-                        model: Backend.detail && Backend.detail.attachments
-                            ? Backend.detail.attachments
+                        model: editor.localDetail && editor.localDetail.attachments
+                            ? editor.localDetail.attachments
                             : []
 
                         delegate: RowLayout {
@@ -732,10 +798,17 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
+                    Controls.BusyIndicator {
+                        visible: !editor.detailReady
+                        running: visible
+                        implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                        implicitHeight: implicitWidth
+                    }
+
                     Controls.Label {
-                        visible: !Backend.detail
-                            || !Backend.detail.attachments
-                            || Backend.detail.attachments.length === 0
+                        visible: editor.detailReady
+                            && (!editor.localDetail.attachments
+                                || editor.localDetail.attachments.length === 0)
                         text: qsTr("No attachments")
                         color: Kirigami.Theme.disabledTextColor
                     }
@@ -756,8 +829,8 @@ Kirigami.ApplicationWindow {
                         Controls.Button {
                             id: migrateAttachmentsButton
                             objectName: "migrateAttachmentsButton"
-                            visible: Boolean(Backend.detail.native_attachments_supported)
-                                && Number(Backend.detail.polyfill_attachment_count || 0) > 0
+                            visible: Boolean(editor.localDetail.native_attachments_supported)
+                                && Number(editor.localDetail.polyfill_attachment_count || 0) > 0
                             text: qsTr("Move to Beads storage")
                             icon.name: "document-import"
                             enabled: !Backend.loading
@@ -765,6 +838,91 @@ Kirigami.ApplicationWindow {
                                 editor.preserveFieldsWhileLoading = true;
                                 Backend.migrateAttachments(editor.issueId);
                             }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    id: relationshipsSection
+                    objectName: "relationshipsSection"
+                    Kirigami.FormData.label: qsTr("Relationships:")
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
+                    visible: !editor.creating
+                    implicitWidth: editor.formFieldWidth
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Controls.BusyIndicator {
+                        visible: !editor.detailReady
+                        running: visible
+                        implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                        implicitHeight: implicitWidth
+                    }
+
+                    Controls.Label {
+                        visible: editor.detailReady
+                            && editor.dependencies.length === 0
+                            && editor.dependents.length === 0
+                        text: qsTr("No linked issues")
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+
+                    Repeater {
+                        model: editor.dependencies
+
+                        delegate: Controls.ItemDelegate {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            icon.name: modelData.dependency_type === "parent-child"
+                                ? "view-list-tree"
+                                : "link"
+                            text: `${editor.relationshipLabel(modelData, false)}  ${modelData.id}  ${modelData.title || ""}`
+                            onClicked: root.openEditor(String(modelData.id))
+                        }
+                    }
+
+                    Repeater {
+                        model: editor.dependents
+
+                        delegate: Controls.ItemDelegate {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            icon.name: modelData.dependency_type === "parent-child"
+                                ? "view-list-tree"
+                                : "link"
+                            text: `${editor.relationshipLabel(modelData, true)}  ${modelData.id}  ${modelData.title || ""}`
+                            onClicked: root.openEditor(String(modelData.id))
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        Controls.ComboBox {
+                            id: relationshipTypeField
+                            objectName: "relationshipTypeField"
+                            textRole: "text"
+                            valueRole: "value"
+                            model: [
+                                { "text": qsTr("Blocked by"), "value": "blocks" },
+                                { "text": qsTr("Parent epic"), "value": "parent-child" }
+                            ]
+                        }
+                        Controls.TextField {
+                            id: relationshipTargetField
+                            objectName: "relationshipTargetField"
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("Issue ID")
+                            onAccepted: editor.addRelationship()
+                        }
+                        Controls.Button {
+                            objectName: "addRelationshipButton"
+                            text: qsTr("Add")
+                            icon.name: "list-add"
+                            enabled: !Backend.loading
+                                && relationshipTargetField.text.trim().length > 0
+                                && relationshipTargetField.text.trim() !== editor.issueId
+                            onClicked: editor.addRelationship()
                         }
                     }
                 }

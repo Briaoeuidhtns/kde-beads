@@ -54,6 +54,7 @@ fn new_issue(title: &str, status: Status) -> NewIssue {
         issue_type: "feature".to_string(),
         assignee: "test-user".to_string(),
         labels: vec!["kde".to_string(), "rust".to_string()],
+        parent: None,
     }
 }
 
@@ -172,6 +173,7 @@ fn updates_issue_fields_and_status() {
             issue_type: "task".to_string(),
             assignee: String::new(),
             labels: vec!["updated".to_string()],
+            parent: None,
         })
         .expect("update issue");
 
@@ -265,5 +267,43 @@ fn migrates_polyfill_after_repairing_missing_native_bytes() {
             .path()
             .join(format!(".beads/kde-beads/attachments/{}/{hash}", issue.id))
             .exists()
+    );
+}
+
+#[test]
+fn creates_child_and_blocking_relationships() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let mut epic_request = new_issue("Parent epic", Status::Open);
+    epic_request.issue_type = "epic".to_string();
+    let epic = client.create(&epic_request).expect("create epic");
+
+    let mut child_request = new_issue("Epic child", Status::Open);
+    child_request.parent = Some(epic.id.clone());
+    let child = client.create(&child_request).expect("create child");
+    let blocker = client
+        .create(&new_issue("Blocking issue", Status::Open))
+        .expect("create blocker");
+    client
+        .add_dependency(&child.id, &blocker.id, "blocks")
+        .expect("add blocking dependency");
+
+    let dependencies = client.dependencies(&child.id).expect("list dependencies");
+    let dependents = client.dependents(&epic.id).expect("list epic children");
+
+    assert!(
+        dependencies
+            .iter()
+            .any(|issue| issue.id == epic.id && issue.dependency_type == "parent-child")
+    );
+    assert!(
+        dependencies
+            .iter()
+            .any(|issue| issue.id == blocker.id && issue.dependency_type == "blocks")
+    );
+    assert!(
+        dependents
+            .iter()
+            .any(|issue| issue.id == child.id && issue.dependency_type == "parent-child")
     );
 }
