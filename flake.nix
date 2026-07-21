@@ -41,7 +41,7 @@
         ];
 
         qtWrapperArgs = [
-          "--prefix PATH : ${lib.makeBinPath [ pkgs.beads ]}"
+          "--prefix PATH : ${lib.makeBinPath [ pkgs.beads pkgs.kdePackages.kdialog ]}"
           "--set-default QT_QUICK_CONTROLS_STYLE org.kde.desktop"
         ];
 
@@ -70,6 +70,7 @@
           beads
           cargo
           clippy
+          kdePackages.kdialog
           rustc
           rustfmt
         ];
