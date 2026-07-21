@@ -16,13 +16,20 @@ QtObject {
     property int moveIssueCallCount: 0
     property int saveIssueCallCount: 0
     property int createIssueCallCount: 0
+    property int addAttachmentCallCount: 0
+    property int openAttachmentCallCount: 0
+    property int removeAttachmentCallCount: 0
+    property int migrateAttachmentsCallCount: 0
     property string lastLoadedId: ""
     property string lastMovedId: ""
     property string lastMovedStatus: ""
     property var lastSavedRequest: ({})
     property var lastCreatedRequest: ({})
+    property string lastAttachmentIssueId: ""
+    property string lastAttachmentId: ""
 
     signal issueSaved(string savedId)
+    signal attachmentReady(string issueId, string path)
 
     function reset() {
         issues = [];
@@ -35,11 +42,17 @@ QtObject {
         moveIssueCallCount = 0;
         saveIssueCallCount = 0;
         createIssueCallCount = 0;
+        addAttachmentCallCount = 0;
+        openAttachmentCallCount = 0;
+        removeAttachmentCallCount = 0;
+        migrateAttachmentsCallCount = 0;
         lastLoadedId = "";
         lastMovedId = "";
         lastMovedStatus = "";
         lastSavedRequest = {};
         lastCreatedRequest = {};
+        lastAttachmentIssueId = "";
+        lastAttachmentId = "";
     }
 
     function reload() {
@@ -65,6 +78,28 @@ QtObject {
     function createIssue(request) {
         createIssueCallCount += 1;
         lastCreatedRequest = request;
+    }
+
+    function addAttachment(issueId) {
+        addAttachmentCallCount += 1;
+        lastAttachmentIssueId = issueId;
+    }
+
+    function openAttachment(issueId, attachmentId) {
+        openAttachmentCallCount += 1;
+        lastAttachmentIssueId = issueId;
+        lastAttachmentId = attachmentId;
+    }
+
+    function removeAttachment(issueId, attachmentId) {
+        removeAttachmentCallCount += 1;
+        lastAttachmentIssueId = issueId;
+        lastAttachmentId = attachmentId;
+    }
+
+    function migrateAttachments(issueId) {
+        migrateAttachmentsCallCount += 1;
+        lastAttachmentIssueId = issueId;
     }
 
     function chooseWorkspace() {}

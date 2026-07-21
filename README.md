@@ -11,6 +11,16 @@ bd create <title> ... --json
 bd update <id> ... --json
 ```
 
+Attachment bytes are the one deliberate exception while upstream Beads attachment support is pending. On versions of `bd` without `bd attachment`, KDE Beads stores content-addressed files under:
+
+```text
+.beads/kde-beads/attachments/<issue-id>/<sha256>
+```
+
+Each issue link is a versioned JSON record in a custom metadata key named `kde_beads.attachment_<sha256>`. Using one namespaced key per file prevents attachment updates from replacing unrelated issue metadata or other attachment records. These local bytes are not included in Dolt sync or backup, so back up `.beads/kde-beads/attachments` separately if they matter.
+
+When `bd attachment` becomes available, KDE Beads reads both native and polyfill attachments, sends new files to the native command, and offers **Move to Beads storage** for existing polyfill files. Migration removes each polyfill record and local copy only after verifying that its native bytes are available, making the operation safe to retry after a partial failure.
+
 ## Run
 
 All build and runtime dependencies are provided by the Nix flake.

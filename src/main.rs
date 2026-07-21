@@ -17,6 +17,7 @@ struct Backend {
     workspace: String,
     error_message: String,
     loading: bool,
+    preview_paths: Vec<PreviewPath>,
 }
 
 impl Default for Backend {
@@ -28,6 +29,7 @@ impl Default for Backend {
             workspace: workspace.to_string_lossy().into_owned(),
             error_message: String::new(),
             loading: false,
+            preview_paths: Vec::new(),
         }
     }
 }
@@ -61,6 +63,9 @@ impl Backend {
 
     #[qsignal(qml_name = "issueSaved")]
     fn issue_saved(&mut self, id: &String);
+
+    #[qsignal(qml_name = "attachmentReady")]
+    fn attachment_ready(&mut self, issue_id: &String, path: &String);
 
     #[qslot]
     fn reload(&mut self) {
@@ -180,6 +185,102 @@ impl Backend {
     }
 
     #[qslot]
+    fn add_attachment(&mut self, issue_id: String) {
+        if self.loading || issue_id.is_empty() {
+            return;
+        }
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let (path, picker_error) = choose_attachment_with_kdialog(&workspace);
+            if !picker_error.is_empty() || path.is_empty() {
+                invoke_method!(
+                    invoker,
+                    "finishAttachmentMutation",
+                    String::new(),
+                    picker_error
+                );
+                return;
+            }
+            let result =
+                Client::new(workspace).and_then(|client| client.add_attachment(&issue_id, path));
+            let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishAttachmentMutation", payload, error);
+        });
+    }
+
+    #[qslot]
+    fn remove_attachment(&mut self, issue_id: String, attachment_id: String) {
+        if self.loading || issue_id.is_empty() || attachment_id.is_empty() {
+            return;
+        }
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = Client::new(workspace)
+                .and_then(|client| client.remove_attachment(&issue_id, &attachment_id));
+            let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishAttachmentMutation", payload, error);
+        });
+    }
+
+    #[qslot]
+    fn open_attachment(&mut self, issue_id: String, attachment_id: String) {
+        if self.loading || issue_id.is_empty() || attachment_id.is_empty() {
+            return;
+        }
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = Client::new(workspace)
+                .and_then(|client| client.materialize_attachment(&issue_id, &attachment_id));
+            let (path, temporary, error) = match result {
+                Ok(materialized) => (
+                    materialized.path.to_string_lossy().into_owned(),
+                    materialized.temporary,
+                    String::new(),
+                ),
+                Err(error) => (String::new(), false, error.to_string()),
+            };
+            invoke_method!(
+                invoker,
+                "finishOpenAttachment",
+                issue_id,
+                path,
+                temporary,
+                error
+            );
+        });
+    }
+
+    #[qslot]
+    fn migrate_attachments(&mut self, issue_id: String) {
+        if self.loading || issue_id.is_empty() {
+            return;
+        }
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = Client::new(workspace)
+                .and_then(|client| client.migrate_polyfill_attachments(&issue_id));
+            let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishAttachmentMutation", payload, error);
+        });
+    }
+
+    #[qslot]
     fn choose_workspace(&mut self) {
         if self.loading {
             return;
@@ -249,6 +350,61 @@ impl Backend {
         if let Some(created_id) = self.finish_mutation(payload, error) {
             self.issue_saved(&created_id);
         }
+    }
+
+    #[qslot(qml_name = "finishAttachmentMutation")]
+    fn finish_attachment_mutation(&mut self, payload: String, error: String) {
+        if !error.is_empty() {
+            self.set_error(error);
+        } else if !payload.is_empty() {
+            match serde_json::from_str::<Issue>(&payload) {
+                Ok(issue) => match serde_json::to_value(issue) {
+                    Ok(Value::Object(updated)) => {
+                        if let Some(detail) = self.detail.as_object_mut() {
+                            for key in [
+                                "attachments",
+                                "metadata",
+                                "native_attachments_supported",
+                                "polyfill_attachment_count",
+                                "updated_at",
+                            ] {
+                                if let Some(value) = updated.get(key) {
+                                    detail.insert(key.to_string(), value.clone());
+                                }
+                            }
+                        } else {
+                            self.detail = Value::Object(updated);
+                        }
+                        self.detail_changed();
+                    }
+                    Ok(_) => self.set_error("Could not encode updated attachments".to_string()),
+                    Err(error) => {
+                        self.set_error(format!("Could not encode updated attachments: {error}"))
+                    }
+                },
+                Err(error) => self.set_error(format!("Could not decode issue: {error}")),
+            }
+        }
+        self.set_loading(false);
+    }
+
+    #[qslot(qml_name = "finishOpenAttachment")]
+    fn finish_open_attachment(
+        &mut self,
+        issue_id: String,
+        path: String,
+        temporary: bool,
+        error: String,
+    ) {
+        if !error.is_empty() {
+            self.set_error(error);
+        } else if !path.is_empty() {
+            if temporary {
+                self.preview_paths.push(PreviewPath(PathBuf::from(&path)));
+            }
+            self.attachment_ready(&issue_id, &path);
+        }
+        self.set_loading(false);
     }
 
     #[qslot(qml_name = "finishChooseWorkspace")]
@@ -334,6 +490,14 @@ impl Backend {
             self.loading = loading;
             self.loading_changed();
         }
+    }
+}
+
+struct PreviewPath(PathBuf);
+
+impl Drop for PreviewPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -471,6 +635,44 @@ fn choose_workspace_with_kdialog(current_workspace: &str) -> (String, String) {
         (
             String::new(),
             format!("The KDE folder picker failed: {error}"),
+        )
+    }
+}
+
+fn choose_attachment_with_kdialog(workspace: &str) -> (String, String) {
+    let output = match Command::new("kdialog")
+        .args(["--title", "Attach a file", "--getopenfilename", workspace])
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return (
+                String::new(),
+                format!("Could not open the KDE file picker: {error}"),
+            );
+        }
+    };
+
+    if output.status.success() {
+        return (
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            String::new(),
+        );
+    }
+    if output.status.code() == Some(1) {
+        return (String::new(), String::new());
+    }
+
+    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if error.is_empty() {
+        (
+            String::new(),
+            format!("The KDE file picker failed with {}", output.status),
+        )
+    } else {
+        (
+            String::new(),
+            format!("The KDE file picker failed: {error}"),
         )
     }
 }

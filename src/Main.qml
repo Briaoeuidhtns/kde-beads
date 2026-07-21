@@ -46,6 +46,31 @@ Kirigami.ApplicationWindow {
         return (Backend.issues || []).filter(issue => issue.status === status).length;
     }
 
+    function attachmentIcon(mimeType) {
+        if (String(mimeType || "").startsWith("image/"))
+            return "image-x-generic";
+        if (mimeType === "application/pdf")
+            return "application-pdf";
+        if (String(mimeType || "").startsWith("text/"))
+            return "text-x-generic";
+        return "application-x-generic";
+    }
+
+    function formatBytes(byteSize) {
+        const size = Number(byteSize || 0);
+        if (size < 1024)
+            return `${size} B`;
+        if (size < 1024 * 1024)
+            return `${(size / 1024).toFixed(1)} KB`;
+        if (size < 1024 * 1024 * 1024)
+            return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    }
+
+    function localFileUrl(path) {
+        return "file://" + String(path).split("/").map(encodeURIComponent).join("/");
+    }
+
     function openEditor(issueId) {
         if (Backend.loading)
             return;
@@ -400,6 +425,7 @@ Kirigami.ApplicationWindow {
 
         property string issueId: ""
         property bool creating: false
+        property bool preserveFieldsWhileLoading: false
         readonly property real formFieldWidth: Math.max(
             Kirigami.Units.gridUnit * 16,
             Math.min(
@@ -489,6 +515,12 @@ Kirigami.ApplicationWindow {
 
         Connections {
             target: Backend
+            enabled: editor.visible
+
+            function onAttachmentReady(issueId, path) {
+                if (issueId === editor.issueId)
+                    Qt.openUrlExternally(root.localFileUrl(path));
+            }
 
             function onDetailChanged() {
                 if (!Backend.loading)
@@ -496,8 +528,12 @@ Kirigami.ApplicationWindow {
             }
 
             function onLoadingChanged() {
-                if (!Backend.loading)
-                    editor.populate();
+                if (!Backend.loading) {
+                    if (editor.preserveFieldsWhileLoading)
+                        editor.preserveFieldsWhileLoading = false;
+                    else
+                        editor.populate();
+                }
             }
 
             function onIssueSaved(savedId) {
@@ -602,6 +638,135 @@ Kirigami.ApplicationWindow {
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     placeholderText: qsTr("Comma-separated labels")
+                }
+
+                ColumnLayout {
+                    id: attachmentsSection
+                    objectName: "attachmentsSection"
+                    Kirigami.FormData.label: qsTr("Attachments:")
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
+                    implicitWidth: editor.formFieldWidth
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+                    visible: !editor.creating
+
+                    Repeater {
+                        objectName: "attachmentsRepeater"
+                        model: Backend.detail && Backend.detail.attachments
+                            ? Backend.detail.attachments
+                            : []
+
+                        delegate: RowLayout {
+                            id: attachmentRow
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Kirigami.Icon {
+                                source: root.attachmentIcon(attachmentRow.modelData.mime_type)
+                                implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                                implicitHeight: implicitWidth
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 0
+
+                                Controls.Label {
+                                    objectName: "attachmentName"
+                                    text: attachmentRow.modelData.original_filename || qsTr("Unnamed attachment")
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                }
+                                Controls.Label {
+                                    text: {
+                                        const provider = attachmentRow.modelData.provider === "polyfill"
+                                            ? qsTr("KDE Beads local")
+                                            : qsTr("Beads");
+                                        const missing = attachmentRow.modelData.missing
+                                            ? ` · ${qsTr("missing locally")}`
+                                            : "";
+                                        return `${root.formatBytes(attachmentRow.modelData.byte_size)} · ${provider}${missing}`;
+                                    }
+                                    color: attachmentRow.modelData.missing
+                                        ? Kirigami.Theme.negativeTextColor
+                                        : Kirigami.Theme.disabledTextColor
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    Layout.fillWidth: true
+                                }
+                            }
+
+                            Controls.ToolButton {
+                                objectName: "openAttachmentButton"
+                                icon.name: "document-open"
+                                text: qsTr("Open")
+                                display: Controls.AbstractButton.IconOnly
+                                enabled: !Backend.loading && !attachmentRow.modelData.missing
+                                Controls.ToolTip.text: text
+                                Controls.ToolTip.visible: hovered
+                                onClicked: {
+                                    editor.preserveFieldsWhileLoading = true;
+                                    Backend.openAttachment(
+                                        editor.issueId,
+                                        attachmentRow.modelData.id
+                                    );
+                                }
+                            }
+
+                            Controls.ToolButton {
+                                objectName: "removeAttachmentButton"
+                                icon.name: "edit-delete-remove"
+                                text: qsTr("Remove")
+                                display: Controls.AbstractButton.IconOnly
+                                enabled: !Backend.loading
+                                Controls.ToolTip.text: text
+                                Controls.ToolTip.visible: hovered
+                                onClicked: {
+                                    editor.preserveFieldsWhileLoading = true;
+                                    Backend.removeAttachment(
+                                        editor.issueId,
+                                        attachmentRow.modelData.id
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    Controls.Label {
+                        visible: !Backend.detail
+                            || !Backend.detail.attachments
+                            || Backend.detail.attachments.length === 0
+                        text: qsTr("No attachments")
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+
+                    RowLayout {
+                        Controls.Button {
+                            id: addAttachmentButton
+                            objectName: "addAttachmentButton"
+                            text: qsTr("Attach file")
+                            icon.name: "mail-attachment"
+                            enabled: !Backend.loading
+                            onClicked: {
+                                editor.preserveFieldsWhileLoading = true;
+                                Backend.addAttachment(editor.issueId);
+                            }
+                        }
+
+                        Controls.Button {
+                            id: migrateAttachmentsButton
+                            objectName: "migrateAttachmentsButton"
+                            visible: Boolean(Backend.detail.native_attachments_supported)
+                                && Number(Backend.detail.polyfill_attachment_count || 0) > 0
+                            text: qsTr("Move to Beads storage")
+                            icon.name: "document-import"
+                            enabled: !Backend.loading
+                            onClicked: {
+                                editor.preserveFieldsWhileLoading = true;
+                                Backend.migrateAttachments(editor.issueId);
+                            }
+                        }
+                    }
                 }
 
                 Controls.ScrollView {

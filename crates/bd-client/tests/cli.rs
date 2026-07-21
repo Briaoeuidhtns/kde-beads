@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::process::Command;
 
 use bd_client::{Client, IssueUpdate, NewIssue, Status};
@@ -52,6 +55,65 @@ fn new_issue(title: &str, status: Status) -> NewIssue {
         assignee: "test-user".to_string(),
         labels: vec!["kde".to_string(), "rust".to_string()],
     }
+}
+
+fn attachment_wrapper(workspace: &TempDir) -> PathBuf {
+    let path = workspace.path().join("fake-bd");
+    fs::write(
+        &path,
+        r#"#!/bin/sh
+readonly_flag=
+if [ "$1" = "--readonly" ]; then
+    readonly_flag=--readonly
+    shift
+fi
+if [ "$1" = "attachment" ]; then
+    if [ "$2" = "--help" ]; then
+        if [ -f .fake-native-enabled ]; then
+            exit 0
+        fi
+        echo 'Error: unknown command "attachment" for "bd"' >&2
+        exit 1
+    fi
+    if [ "$2" = "list" ]; then
+        if [ ! -s .fake-native-hash ]; then
+            printf '[]\n'
+            exit 0
+        fi
+        hash=$(cat .fake-native-hash)
+        missing=false
+        if [ ! -f ".fake-native-$hash" ]; then
+            missing=true
+        fi
+        printf '[{"id":"native-1","issue_id":"%s","hash_algorithm":"sha256","content_hash":"%s","original_filename":"migration.txt","mime_type":"text/plain","byte_size":17,"storage_relpath":"attachments/%s/%s","missing":%s}]\n' "$3" "$hash" "$3" "$hash" "$missing"
+        exit 0
+    fi
+    if [ "$2" = "add" ]; then
+        hash=$(sha256sum "$4" | cut -d ' ' -f 1)
+        cp "$4" ".fake-native-$hash"
+        if [ -s .fake-native-hash ]; then
+            echo 'duplicate attachment metadata' >&2
+            exit 1
+        fi
+        printf '%s' "$hash" > .fake-native-hash
+        printf '{}\n'
+        exit 0
+    fi
+    if [ "$2" = "copy" ]; then
+        hash=$(cat .fake-native-hash)
+        cp ".fake-native-$hash" "$5"
+        printf '{"status":"copied"}\n'
+        exit 0
+    fi
+fi
+exec bd $readonly_flag "$@"
+"#,
+    )
+    .expect("write fake bd wrapper");
+    let mut permissions = fs::metadata(&path).expect("stat wrapper").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&path, permissions).expect("make wrapper executable");
+    path
 }
 
 #[test]
@@ -118,4 +180,90 @@ fn updates_issue_fields_and_status() {
     assert_eq!(updated.status, Status::InProgress);
     assert_eq!(updated.priority, 2);
     assert_eq!(updated.labels, ["updated"]);
+}
+
+#[test]
+fn adds_opens_and_removes_an_attachment() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let issue = client
+        .create(&new_issue("Issue with attachment", Status::Open))
+        .expect("create issue");
+    let source = workspace.path().join("screenshot.png");
+    fs::write(&source, b"not really a png").expect("write attachment source");
+
+    let attached = client
+        .add_attachment(&issue.id, &source)
+        .expect("add attachment");
+    assert_eq!(attached.attachments.len(), 1);
+    assert_eq!(attached.attachments[0].original_filename, "screenshot.png");
+
+    let materialized = client
+        .materialize_attachment(&issue.id, &attached.attachments[0].id)
+        .expect("materialize attachment");
+    assert!(!materialized.temporary);
+    assert_eq!(
+        fs::read(materialized.path).expect("read attachment"),
+        b"not really a png"
+    );
+
+    let removed = client
+        .remove_attachment(&issue.id, &attached.attachments[0].id)
+        .expect("remove attachment");
+    assert!(removed.attachments.is_empty());
+}
+
+#[test]
+fn migrates_polyfill_after_repairing_missing_native_bytes() {
+    let workspace = workspace();
+    let wrapper = attachment_wrapper(&workspace);
+    let client = Client::with_binary(workspace.path(), &wrapper).expect("create wrapped client");
+    let issue = client
+        .create(&new_issue("Attachment migration", Status::Open))
+        .expect("create issue");
+    let source = workspace.path().join("migration.txt");
+    fs::write(&source, b"migration payload").expect("write migration source");
+
+    let polyfill = client
+        .add_attachment(&issue.id, &source)
+        .expect("add polyfill attachment");
+    let hash = polyfill.attachments[0].content_hash.clone();
+    assert_eq!(
+        polyfill.attachments[0].provider,
+        bd_client::AttachmentProvider::Polyfill
+    );
+
+    // Simulate synced native metadata whose local bytes are missing.
+    fs::write(workspace.path().join(".fake-native-hash"), &hash)
+        .expect("write fake native metadata");
+    fs::write(workspace.path().join(".fake-native-enabled"), b"")
+        .expect("enable native attachments");
+
+    let migrated = client
+        .migrate_polyfill_attachments(&issue.id)
+        .expect("migrate attachment");
+
+    assert_eq!(migrated.polyfill_attachment_count, 0);
+    assert_eq!(migrated.attachments.len(), 1);
+    assert_eq!(
+        migrated.attachments[0].provider,
+        bd_client::AttachmentProvider::Native
+    );
+    assert!(
+        !migrated
+            .metadata
+            .keys()
+            .any(|key| key.starts_with("kde_beads.attachment_"))
+    );
+    assert_eq!(
+        fs::read(workspace.path().join(format!(".fake-native-{hash}")))
+            .expect("read repaired native bytes"),
+        b"migration payload"
+    );
+    assert!(
+        !workspace
+            .path()
+            .join(format!(".beads/kde-beads/attachments/{}/{hash}", issue.id))
+            .exists()
+    );
 }

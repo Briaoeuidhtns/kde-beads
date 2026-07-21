@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,11 @@ use std::process::Command;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+mod attachments;
+
+pub use attachments::{Attachment, AttachmentProvider, MaterializedAttachment};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Issue {
@@ -46,6 +52,14 @@ pub struct Issue {
     pub dependent_count: u64,
     #[serde(default)]
     pub comment_count: u64,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    pub native_attachments_supported: bool,
+    #[serde(default)]
+    pub polyfill_attachment_count: usize,
 }
 
 fn default_priority() -> u8 {
@@ -181,6 +195,12 @@ impl Client {
     }
 
     pub fn show(&self, id: &str) -> Result<Issue, Error> {
+        let mut issue = self.show_raw(id)?;
+        self.hydrate_attachments(&mut issue)?;
+        Ok(issue)
+    }
+
+    fn show_raw(&self, id: &str) -> Result<Issue, Error> {
         let payload = self.run(true, &["show", id, "--json"])?;
         parse_single_issue("show", &payload)
     }
@@ -329,6 +349,7 @@ pub enum Error {
         operation: &'static str,
         count: usize,
     },
+    Attachment(String),
 }
 
 impl fmt::Display for Error {
@@ -371,6 +392,7 @@ impl fmt::Display for Error {
                     "bd {operation} returned {count} issues instead of one"
                 )
             }
+            Self::Attachment(message) => formatter.write_str(message),
         }
     }
 }
