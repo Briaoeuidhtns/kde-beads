@@ -17,6 +17,8 @@ struct Backend {
     workspace: String,
     error_message: String,
     loading: bool,
+    polling: bool,
+    discard_poll: bool,
     preview_paths: Vec<PreviewPath>,
 }
 
@@ -29,6 +31,8 @@ impl Default for Backend {
             workspace: workspace.to_string_lossy().into_owned(),
             error_message: String::new(),
             loading: false,
+            polling: false,
+            discard_poll: false,
             preview_paths: Vec::new(),
         }
     }
@@ -82,6 +86,24 @@ impl Backend {
             let result = Client::new(workspace).and_then(|client| client.list());
             let (payload, error) = encode_result(result);
             invoke_method!(invoker, "finishReload", payload, error);
+        });
+    }
+
+    #[qslot]
+    fn poll(&mut self) {
+        if self.loading || self.polling {
+            return;
+        }
+
+        self.polling = true;
+        self.discard_poll = false;
+        let workspace = self.workspace.clone();
+        let result_workspace = workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = Client::new(workspace).and_then(|client| client.list());
+            let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishPoll", payload, error, result_workspace);
         });
     }
 
@@ -365,8 +387,9 @@ impl Backend {
         if error.is_empty() {
             match serde_json::from_str::<Vec<Value>>(&payload) {
                 Ok(issues) => {
-                    self.issues = issues;
-                    self.issues_changed();
+                    if replace_if_changed(&mut self.issues, issues) {
+                        self.issues_changed();
+                    }
                 }
                 Err(error) => self.set_error(format!("Could not decode issue list: {error}")),
             }
@@ -374,6 +397,23 @@ impl Backend {
             self.set_error(error);
         }
         self.set_loading(false);
+    }
+
+    #[qslot(qml_name = "finishPoll")]
+    fn finish_poll(&mut self, payload: String, error: String, workspace: String) {
+        let should_apply =
+            error.is_empty() && !self.loading && !self.discard_poll && workspace == self.workspace;
+        self.polling = false;
+        self.discard_poll = false;
+
+        if !should_apply {
+            return;
+        }
+        if let Ok(issues) = serde_json::from_str::<Vec<Value>>(&payload)
+            && replace_if_changed(&mut self.issues, issues)
+        {
+            self.issues_changed();
+        }
     }
 
     #[qslot(qml_name = "finishLoadIssue")]
@@ -588,6 +628,9 @@ impl Backend {
     }
 
     fn set_loading(&mut self, loading: bool) {
+        if loading && self.polling {
+            self.discard_poll = true;
+        }
         if self.loading != loading {
             self.loading = loading;
             self.loading_changed();
@@ -842,6 +885,14 @@ fn issues_to_values(issues: Vec<Issue>) -> Result<Vec<Value>, String> {
         .collect()
 }
 
+fn replace_if_changed<T: PartialEq>(current: &mut T, replacement: T) -> bool {
+    if *current == replacement {
+        return false;
+    }
+    *current = replacement;
+    true
+}
+
 fn initial_workspace() -> PathBuf {
     std::env::args_os()
         .nth(1)
@@ -941,5 +992,17 @@ mod tests {
         assert_eq!(issue.status, Status::Open);
         assert_eq!(issue.labels, ["kde", "rust"]);
         assert_eq!(issue.parent.as_deref(), Some("bd-epic"));
+    }
+
+    #[test]
+    fn replaces_polled_issues_only_when_changed() {
+        let mut issues = vec![json!({"id": "bd-1"})];
+
+        assert!(!replace_if_changed(
+            &mut issues,
+            vec![json!({"id": "bd-1"})]
+        ));
+        assert!(replace_if_changed(&mut issues, vec![json!({"id": "bd-2"})]));
+        assert_eq!(issues, vec![json!({"id": "bd-2"})]);
     }
 }

@@ -12,6 +12,7 @@ QtObject {
     property bool loading: false
 
     property int reloadCallCount: 0
+    property int pollCallCount: 0
     property int loadIssueCallCount: 0
     property int moveIssueCallCount: 0
     property int saveIssueCallCount: 0
@@ -45,6 +46,7 @@ QtObject {
         errorMessage = "";
         loading = false;
         reloadCallCount = 0;
+        pollCallCount = 0;
         loadIssueCallCount = 0;
         moveIssueCallCount = 0;
         saveIssueCallCount = 0;
@@ -71,6 +73,10 @@ QtObject {
 
     function reload() {
         reloadCallCount += 1;
+    }
+
+    function poll() {
+        pollCallCount += 1;
     }
 
     function loadIssue(issueId) {

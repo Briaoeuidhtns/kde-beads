@@ -19,6 +19,14 @@ Kirigami.ApplicationWindow {
     visible: true
     title: qsTr("Beads")
 
+    Timer {
+        objectName: "changePollTimer"
+        interval: 2000
+        running: true
+        repeat: true
+        onTriggered: Backend.poll()
+    }
+
     function issuesForStatus(status) {
         const query = searchField.text.trim().toLowerCase();
         return (Backend.issues || []).filter(issue => {

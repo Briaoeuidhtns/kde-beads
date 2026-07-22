@@ -68,6 +68,16 @@ Item {
             tryVerify(() => findChild(app, "editorPage") !== null);
         }
 
+        function test_change_poll_timer_requests_background_poll() {
+            createApp([]);
+            const timer = findChild(app, "changePollTimer");
+
+            verify(timer);
+            verify(timer.running);
+            timer.triggered();
+            compare(Backend.pollCallCount, 1);
+        }
+
         function test_empty_secondary_statuses_start_collapsed() {
             createApp([]);
 
