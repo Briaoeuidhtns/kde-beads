@@ -315,12 +315,25 @@ Item {
             };
             createApp();
             app.openEditor("test-existing");
+            const editor = findChild(app, "editorPage");
             const repeater = findChild(app, "attachmentsRepeater");
             verify(repeater);
             tryCompare(repeater, "count", 1);
             const attachmentRow = repeater.itemAt(0);
             verify(attachmentRow);
             verify(findChild(attachmentRow, "attachmentName"));
+            tryCompare(Backend, "previewAttachmentCallCount", 1);
+            compare(Backend.lastAttachmentId, "polyfill:abc");
+            Backend.attachmentPreviewReady(
+                "test-existing",
+                "polyfill:abc",
+                "/tmp/preview.png"
+            );
+            compare(
+                editor.attachmentPreviewState("polyfill:abc"),
+                "/tmp/preview.png"
+            );
+            verify(findChild(attachmentRow, "attachmentPreview").visible);
             findChild(app, "descriptionField").text = "Unsaved description";
 
             findChild(attachmentRow, "openAttachmentButton").clicked();

@@ -71,6 +71,14 @@ impl Backend {
     #[qsignal(qml_name = "attachmentReady")]
     fn attachment_ready(&mut self, issue_id: &String, path: &String);
 
+    #[qsignal(qml_name = "attachmentPreviewReady")]
+    fn attachment_preview_ready(
+        &mut self,
+        issue_id: &String,
+        attachment_id: &String,
+        path: &String,
+    );
+
     #[qslot]
     fn reload(&mut self) {
         if self.loading {
@@ -263,20 +271,35 @@ impl Backend {
         let workspace = self.workspace.clone();
         let invoker = self.get_qml_method_invoker();
         thread::spawn(move || {
-            let result = Client::new(workspace)
-                .and_then(|client| client.materialize_attachment(&issue_id, &attachment_id));
-            let (path, temporary, error) = match result {
-                Ok(materialized) => (
-                    materialized.path.to_string_lossy().into_owned(),
-                    materialized.temporary,
-                    String::new(),
-                ),
-                Err(error) => (String::new(), false, error.to_string()),
-            };
+            let (path, temporary, error) =
+                materialize_attachment(workspace, &issue_id, &attachment_id);
             invoke_method!(
                 invoker,
                 "finishOpenAttachment",
                 issue_id,
+                path,
+                temporary,
+                error
+            );
+        });
+    }
+
+    #[qslot]
+    fn preview_attachment(&mut self, issue_id: String, attachment_id: String) {
+        if issue_id.is_empty() || attachment_id.is_empty() {
+            return;
+        }
+
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let (path, temporary, error) =
+                materialize_attachment(workspace, &issue_id, &attachment_id);
+            invoke_method!(
+                invoker,
+                "finishPreviewAttachment",
+                issue_id,
+                attachment_id,
                 path,
                 temporary,
                 error
@@ -504,6 +527,25 @@ impl Backend {
             self.attachment_ready(&issue_id, &path);
         }
         self.set_loading(false);
+    }
+
+    #[qslot(qml_name = "finishPreviewAttachment")]
+    fn finish_preview_attachment(
+        &mut self,
+        issue_id: String,
+        attachment_id: String,
+        path: String,
+        temporary: bool,
+        error: String,
+    ) {
+        if error.is_empty() && !path.is_empty() {
+            if temporary {
+                self.preview_paths.push(PreviewPath(PathBuf::from(&path)));
+            }
+            self.attachment_preview_ready(&issue_id, &attachment_id, &path);
+        } else {
+            self.attachment_preview_ready(&issue_id, &attachment_id, &String::new());
+        }
     }
 
     #[qslot(qml_name = "finishAddDependency")]
@@ -792,6 +834,23 @@ fn add_comment_and_list(
     let detail = load_issue_detail(&client, issue_id)?;
     let issues = client.list()?;
     Ok(DetailMutationResult { detail, issues })
+}
+
+fn materialize_attachment(
+    workspace: String,
+    issue_id: &str,
+    attachment_id: &str,
+) -> (String, bool, String) {
+    match Client::new(workspace)
+        .and_then(|client| client.materialize_attachment(issue_id, attachment_id))
+    {
+        Ok(materialized) => (
+            materialized.path.to_string_lossy().into_owned(),
+            materialized.temporary,
+            String::new(),
+        ),
+        Err(error) => (String::new(), false, error.to_string()),
+    }
 }
 
 fn choose_workspace_with_kdialog(current_workspace: &str) -> (String, String) {
