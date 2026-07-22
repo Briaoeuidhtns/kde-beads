@@ -20,6 +20,7 @@ QtObject {
     property int addDependencyCallCount: 0
     property int addCommentCallCount: 0
     property int addAttachmentCallCount: 0
+    property int addAttachmentsCallCount: 0
     property int openAttachmentCallCount: 0
     property int previewAttachmentCallCount: 0
     property int removeAttachmentCallCount: 0
@@ -36,6 +37,7 @@ QtObject {
     property string lastCommentText: ""
     property string lastAttachmentIssueId: ""
     property string lastAttachmentId: ""
+    property var lastAttachmentUrls: []
 
     signal issueSaved(string savedId)
     signal attachmentReady(string issueId, string path)
@@ -56,6 +58,7 @@ QtObject {
         addDependencyCallCount = 0;
         addCommentCallCount = 0;
         addAttachmentCallCount = 0;
+        addAttachmentsCallCount = 0;
         openAttachmentCallCount = 0;
         previewAttachmentCallCount = 0;
         removeAttachmentCallCount = 0;
@@ -72,6 +75,7 @@ QtObject {
         lastCommentText = "";
         lastAttachmentIssueId = "";
         lastAttachmentId = "";
+        lastAttachmentUrls = [];
     }
 
     function reload() {
@@ -119,6 +123,12 @@ QtObject {
     function addAttachment(issueId) {
         addAttachmentCallCount += 1;
         lastAttachmentIssueId = issueId;
+    }
+
+    function addAttachments(issueId, urls) {
+        addAttachmentsCallCount += 1;
+        lastAttachmentIssueId = issueId;
+        lastAttachmentUrls = urls;
     }
 
     function openAttachment(issueId, attachmentId) {

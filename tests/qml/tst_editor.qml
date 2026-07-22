@@ -354,5 +354,70 @@ Item {
             compare(Backend.migrateAttachmentsCallCount, 1);
             compare(app.localFileUrl("/tmp/a b#c"), "file:///tmp/a%20b%23c");
         }
+
+        function test_existing_issue_attaches_file_urls() {
+            Backend.detail = {
+                "id": "test-existing",
+                "title": "Issue with dropped files",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "attachments": []
+            };
+            createApp();
+            app.openEditor("test-existing");
+            const editor = findChild(app, "editorPage");
+            const dropArea = findChild(editor, "attachmentDropArea");
+            verify(dropArea);
+            compare(dropArea.enabled, false);
+            editor.detailReady = true;
+            compare(dropArea.enabled, true);
+
+            verify(editor.attachFileUrls([
+                "file:///tmp/one.png",
+                "https://example.com/not-local",
+                "file:///tmp/two%20words.txt"
+            ]));
+
+            compare(Backend.addAttachmentsCallCount, 1);
+            compare(Backend.lastAttachmentIssueId, "test-existing");
+            compare(Backend.lastAttachmentUrls.length, 2);
+            compare(Backend.lastAttachmentUrls[0], "file:///tmp/one.png");
+            compare(Backend.lastAttachmentUrls[1], "file:///tmp/two%20words.txt");
+            compare(editor.preserveFieldsWhileLoading, true);
+
+            verify(!editor.attachFileUrls(["https://example.com/not-local"]));
+            compare(Backend.addAttachmentsCallCount, 1);
+        }
+
+        function test_pasting_files_attaches_them() {
+            Backend.detail = {
+                "id": "test-existing",
+                "title": "Issue with pasted files",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "attachments": []
+            };
+            createApp();
+            app.openEditor("test-existing");
+            const editor = findChild(app, "editorPage");
+            const clipboard = findChild(app, "attachmentClipboard");
+            const shortcut = findChild(editor, "attachmentPasteShortcut");
+            editor.detailReady = true;
+            clipboard.content = [
+                Qt.resolvedUrl("file:///tmp/pasted-one.png"),
+                Qt.resolvedUrl("file:///tmp/pasted-two.txt")
+            ];
+            tryCompare(shortcut, "enabled", true);
+
+            findChild(editor, "titleField").forceActiveFocus();
+            keyClick(Qt.Key_V, Qt.ControlModifier);
+
+            tryCompare(Backend, "addAttachmentsCallCount", 1);
+            compare(Backend.lastAttachmentUrls.length, 2);
+            compare(Backend.lastAttachmentUrls[0], "file:///tmp/pasted-one.png");
+            compare(Backend.lastAttachmentUrls[1], "file:///tmp/pasted-two.txt");
+        }
     }
 }

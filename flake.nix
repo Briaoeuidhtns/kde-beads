@@ -16,6 +16,7 @@
       qtBuildInputs = with pkgs.kdePackages; [
         qtbase
         qtdeclarative
+        kdeclarative
         kirigami
         qqc2-desktop-style
       ];

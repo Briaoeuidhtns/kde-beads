@@ -6,6 +6,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kquickcontrolsaddons as KQuickControlsAddons
 import kde_beads
 
 Kirigami.ApplicationWindow {
@@ -25,6 +26,11 @@ Kirigami.ApplicationWindow {
         running: true
         repeat: true
         onTriggered: Backend.poll()
+    }
+
+    KQuickControlsAddons.Clipboard {
+        id: attachmentClipboard
+        objectName: "attachmentClipboard"
     }
 
     function issuesForStatus(status) {
@@ -487,6 +493,9 @@ Kirigami.ApplicationWindow {
             ? qsTr("Create ticket")
             : (titleField.text.length > 0 ? titleField.text : issueId)
 
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: event => editor.handlePasteEvent(event)
+
         function statusIndex(status) {
             const statuses = ["open", "in_progress", "blocked", "deferred", "closed"];
             return Math.max(0, statuses.indexOf(status));
@@ -545,6 +554,38 @@ Kirigami.ApplicationWindow {
             previews[attachmentId] = null;
             attachmentPreviews = previews;
             Backend.previewAttachment(issueId, attachmentId);
+        }
+
+        function localFileUrls(urls) {
+            return Array.from(urls || [])
+                .map(url => String(url))
+                .filter(url => url.toLowerCase().startsWith("file:"));
+        }
+
+        function canAttachFiles() {
+            return persisted && detailReady && !Backend.loading;
+        }
+
+        function attachFileUrls(urls) {
+            const localUrls = localFileUrls(urls);
+            if (!canAttachFiles() || localUrls.length === 0)
+                return false;
+            preserveFieldsWhileLoading = true;
+            Backend.addAttachments(issueId, localUrls);
+            return true;
+        }
+
+        function clipboardFileUrls() {
+            if (!attachmentClipboard.formats.includes("text/uri-list"))
+                return [];
+            return localFileUrls(attachmentClipboard.contentFormat("text/uri-list"));
+        }
+
+        function handlePasteEvent(event) {
+            if (event.matches(StandardKey.Paste)
+                    && attachFileUrls(clipboardFileUrls())) {
+                event.accepted = true;
+            }
         }
 
         function relationshipTargetAllowed(targetId) {
@@ -668,6 +709,15 @@ Kirigami.ApplicationWindow {
             onActivated: root.pageStack.layers.pop()
         }
 
+        Shortcut {
+            objectName: "attachmentPasteShortcut"
+            sequences: [StandardKey.Paste]
+            enabled: root.pageStack.layers.currentItem === editor
+                && editor.canAttachFiles()
+                && editor.clipboardFileUrls().length > 0
+            onActivated: editor.attachFileUrls(editor.clipboardFileUrls())
+        }
+
         Component.onCompleted: {
             if (editor.creating)
                 editor.initializeCreate();
@@ -758,6 +808,62 @@ Kirigami.ApplicationWindow {
             }
         }
 
+        DropArea {
+            id: attachmentDropArea
+            objectName: "attachmentDropArea"
+            parent: editor
+            anchors.fill: parent
+            z: 1000
+            enabled: editor.canAttachFiles()
+
+            onEntered: drag => {
+                if (editor.localFileUrls(drag.urls).length > 0)
+                    drag.accept(Qt.CopyAction);
+                else
+                    drag.accepted = false;
+            }
+            onDropped: drop => {
+                if (editor.attachFileUrls(drop.urls))
+                    drop.accept(Qt.CopyAction);
+                else
+                    drop.accepted = false;
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                visible: attachmentDropArea.containsDrag
+                radius: Kirigami.Units.cornerRadius
+                color: Kirigami.Theme.alternateBackgroundColor
+                border.width: Kirigami.Units.smallSpacing
+                border.color: Kirigami.Theme.highlightColor
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: Kirigami.Units.largeSpacing
+
+                    Kirigami.Icon {
+                        Layout.alignment: Qt.AlignHCenter
+                        source: "mail-attachment"
+                        implicitWidth: Kirigami.Units.iconSizes.huge
+                        implicitHeight: implicitWidth
+                        color: Kirigami.Theme.highlightColor
+                    }
+                    Controls.Label {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: qsTr("Drop files to attach")
+                        font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.35
+                        font.weight: Font.DemiBold
+                    }
+                    Controls.Label {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: qsTr("Release to add them to %1").arg(editor.issueId)
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+                }
+            }
+        }
+
         ColumnLayout {
             width: editor.availableWidth
             spacing: Kirigami.Units.largeSpacing
@@ -809,6 +915,8 @@ Kirigami.ApplicationWindow {
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     placeholderText: qsTr("Issue title")
+                    Keys.priority: Keys.BeforeItem
+                    Keys.onPressed: event => editor.handlePasteEvent(event)
                 }
 
                 Controls.ComboBox {
@@ -842,6 +950,8 @@ Kirigami.ApplicationWindow {
                     implicitWidth: editor.formFieldWidth
                     editable: true
                     model: ["bug", "feature", "task", "epic", "chore", "decision"]
+                    Keys.priority: Keys.BeforeItem
+                    Keys.onPressed: event => editor.handlePasteEvent(event)
                 }
 
                 Controls.TextField {
@@ -851,6 +961,8 @@ Kirigami.ApplicationWindow {
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     placeholderText: qsTr("Unassigned")
+                    Keys.priority: Keys.BeforeItem
+                    Keys.onPressed: event => editor.handlePasteEvent(event)
                 }
 
                 Controls.TextField {
@@ -860,6 +972,8 @@ Kirigami.ApplicationWindow {
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     placeholderText: qsTr("Comma-separated labels")
+                    Keys.priority: Keys.BeforeItem
+                    Keys.onPressed: event => editor.handlePasteEvent(event)
                 }
 
                 ColumnLayout {
@@ -1149,6 +1263,8 @@ Kirigami.ApplicationWindow {
                             property var candidates: editor.relationshipCandidates(text)
                             placeholderText: qsTr("Search issue ID or title")
                             Accessible.description: qsTr("Search issues by ID or title")
+                            Keys.priority: Keys.BeforeItem
+                            Keys.onPressed: event => editor.handlePasteEvent(event)
 
                             function updateSuggestions() {
                                 relationshipSuggestionList.currentIndex = 0;
@@ -1283,6 +1399,8 @@ Kirigami.ApplicationWindow {
                         objectName: "descriptionField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Describe the work")
+                        Keys.priority: Keys.BeforeItem
+                        Keys.onPressed: event => editor.handlePasteEvent(event)
                     }
                 }
 
@@ -1298,6 +1416,8 @@ Kirigami.ApplicationWindow {
                         objectName: "acceptanceField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Acceptance criteria")
+                        Keys.priority: Keys.BeforeItem
+                        Keys.onPressed: event => editor.handlePasteEvent(event)
                     }
                 }
 
@@ -1313,6 +1433,8 @@ Kirigami.ApplicationWindow {
                         objectName: "designField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Implementation notes")
+                        Keys.priority: Keys.BeforeItem
+                        Keys.onPressed: event => editor.handlePasteEvent(event)
                     }
                 }
 
@@ -1328,6 +1450,8 @@ Kirigami.ApplicationWindow {
                         objectName: "notesField"
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Additional notes")
+                        Keys.priority: Keys.BeforeItem
+                        Keys.onPressed: event => editor.handlePasteEvent(event)
                     }
                 }
 
@@ -1405,6 +1529,8 @@ Kirigami.ApplicationWindow {
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Add a comment")
                         enabled: editor.persisted && editor.detailReady && !Backend.loading
+                        Keys.priority: Keys.BeforeItem
+                        Keys.onPressed: event => editor.handlePasteEvent(event)
                     }
 
                     RowLayout {

@@ -10,6 +10,7 @@ use bd_client::{Client, Comment, Issue, IssueUpdate, LinkedIssue, NewIssue, Stat
 use qtbridge::{QApp, QObjectHolder, invoke_method, qobject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use url::Url;
 
 struct Backend {
     issues: Vec<Value>,
@@ -238,6 +239,37 @@ impl Backend {
             let result =
                 Client::new(workspace).and_then(|client| client.add_attachment(&issue_id, path));
             let (payload, error) = encode_result(result);
+            invoke_method!(invoker, "finishAttachmentMutation", payload, error);
+        });
+    }
+
+    #[qslot]
+    fn add_attachments(&mut self, issue_id: String, urls: Vec<Value>) {
+        if self.loading || issue_id.is_empty() {
+            return;
+        }
+        let paths = match attachment_paths_from_urls(urls) {
+            Ok(paths) => paths,
+            Err(error) => {
+                self.set_error(error);
+                return;
+            }
+        };
+
+        self.set_error(String::new());
+        self.set_loading(true);
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let (issue, mut error) = add_attachments_to_issue(workspace, &issue_id, paths);
+            let payload = issue
+                .map(|issue| {
+                    serde_json::to_string(&issue).unwrap_or_else(|encode_error| {
+                        error = format!("Could not encode updated attachments: {encode_error}");
+                        String::new()
+                    })
+                })
+                .unwrap_or_default();
             invoke_method!(invoker, "finishAttachmentMutation", payload, error);
         });
     }
@@ -478,7 +510,8 @@ impl Backend {
     fn finish_attachment_mutation(&mut self, payload: String, error: String) {
         if !error.is_empty() {
             self.set_error(error);
-        } else if !payload.is_empty() {
+        }
+        if !payload.is_empty() {
             match serde_json::from_str::<Issue>(&payload) {
                 Ok(issue) => match serde_json::to_value(issue) {
                     Ok(Value::Object(updated)) => {
@@ -853,6 +886,46 @@ fn materialize_attachment(
     }
 }
 
+fn attachment_paths_from_urls(urls: Vec<Value>) -> Result<Vec<PathBuf>, String> {
+    if urls.is_empty() {
+        return Err("No files were selected for attachment".to_string());
+    }
+
+    urls.into_iter()
+        .map(|value| {
+            let value = value
+                .as_str()
+                .ok_or_else(|| "Attachment URLs must be strings".to_string())?;
+            let url = Url::parse(value)
+                .map_err(|error| format!("Could not read attachment URL: {error}"))?;
+            if url.scheme() != "file" {
+                return Err("Only local files can be attached".to_string());
+            }
+            url.to_file_path()
+                .map_err(|_| format!("Could not convert attachment URL to a local path: {value}"))
+        })
+        .collect()
+}
+
+fn add_attachments_to_issue(
+    workspace: String,
+    issue_id: &str,
+    paths: Vec<PathBuf>,
+) -> (Option<Issue>, String) {
+    let client = match Client::new(workspace) {
+        Ok(client) => client,
+        Err(error) => return (None, error.to_string()),
+    };
+    let mut issue = None;
+    for path in paths {
+        match client.add_attachment(issue_id, path) {
+            Ok(updated) => issue = Some(updated),
+            Err(error) => return (issue, error.to_string()),
+        }
+    }
+    (issue, String::new())
+}
+
 fn choose_workspace_with_kdialog(current_workspace: &str) -> (String, String) {
     let output = match Command::new("kdialog")
         .args([
@@ -1063,5 +1136,33 @@ mod tests {
         ));
         assert!(replace_if_changed(&mut issues, vec![json!({"id": "bd-2"})]));
         assert_eq!(issues, vec![json!({"id": "bd-2"})]);
+    }
+
+    #[test]
+    fn converts_local_attachment_urls_to_paths() {
+        let paths = attachment_paths_from_urls(vec![
+            Value::String("file:///tmp/a%20file%23one.png".to_string()),
+            Value::String("file:///tmp/two.txt".to_string()),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            paths,
+            [
+                PathBuf::from("/tmp/a file#one.png"),
+                PathBuf::from("/tmp/two.txt")
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_non_file_attachment_urls() {
+        assert_eq!(
+            attachment_paths_from_urls(vec![Value::String(
+                "https://example.com/file.png".to_string()
+            )])
+            .unwrap_err(),
+            "Only local files can be attached"
+        );
     }
 }
