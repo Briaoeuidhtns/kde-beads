@@ -54,3 +54,5 @@
 # - github.repo
 
 export.auto: false
+
+sync.remote: "git+ssh://git@github.com/Briaoeuidhtns/kde-beads.git"
