@@ -14,6 +14,7 @@ Kirigami.Page {
 
     required property var issues
     required property bool backendLoading
+    required property bool backendRefreshing
     required property string backendErrorMessage
     required property string workspace
     property int closedRangeDays: 0
@@ -82,9 +83,10 @@ Kirigami.Page {
             onTriggered: boardPage.createIssueRequested()
         },
         Kirigami.Action {
+            objectName: "refreshAction"
             text: qsTr("Refresh")
             icon.name: "view-refresh"
-            enabled: !boardPage.backendLoading
+            enabled: !boardPage.backendLoading && !boardPage.backendRefreshing
             shortcut: StandardKey.Refresh
             onTriggered: boardPage.refreshRequested()
         }
@@ -99,10 +101,13 @@ Kirigami.Page {
         spacing: 0
 
         Controls.ProgressBar {
+            objectName: "boardProgress"
             Layout.fillWidth: true
-            implicitHeight: boardPage.backendLoading ? Kirigami.Units.smallSpacing : 0
+            implicitHeight: boardPage.backendLoading || boardPage.backendRefreshing
+                ? Kirigami.Units.smallSpacing
+                : 0
             indeterminate: true
-            visible: boardPage.backendLoading
+            visible: boardPage.backendLoading || boardPage.backendRefreshing
         }
 
         Kirigami.InlineMessage {

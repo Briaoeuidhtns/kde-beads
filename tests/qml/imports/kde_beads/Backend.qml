@@ -11,6 +11,7 @@ QtObject {
     property bool startupWorkspaceExplicit: false
     property string errorMessage: ""
     property bool loading: false
+    property bool refreshing: false
 
     property int reloadCallCount: 0
     property int pollCallCount: 0
@@ -54,6 +55,7 @@ QtObject {
         startupWorkspaceExplicit = false;
         errorMessage = "";
         loading = false;
+        refreshing = false;
         reloadCallCount = 0;
         pollCallCount = 0;
         loadIssueCallCount = 0;

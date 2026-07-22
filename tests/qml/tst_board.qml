@@ -293,6 +293,33 @@ Item {
             compare(list.itemAt(1).highlighted, true);
         }
 
+        function test_project_switching_remains_available_while_loading() {
+            createApp([]);
+            app.rememberProject("/tmp/another-project");
+            const list = findChild(app, "projectList");
+            Backend.loading = true;
+
+            compare(list.itemAt(1).enabled, true);
+            app.selectProject("/tmp/another-project");
+
+            compare(Backend.switchWorkspaceCallCount, 1);
+            compare(Backend.workspace, "/tmp/another-project");
+        }
+
+        function test_background_refresh_keeps_cached_board_interactive() {
+            createApp([issue("cached-issue", "open")]);
+            const progress = findChild(app, "boardProgress");
+            const createAction = findChild(app, "createTicketAction");
+            const refreshAction = findChild(app, "refreshAction");
+            const list = findChild(app, "cardList-open");
+            Backend.refreshing = true;
+
+            compare(list.count, 1);
+            compare(progress.visible, true);
+            compare(createAction.enabled, true);
+            compare(refreshAction.enabled, false);
+        }
+
         function test_project_sidebar_becomes_modal_on_narrow_windows() {
             createApp([]);
             const sidebar = findChild(app, "projectSidebar");

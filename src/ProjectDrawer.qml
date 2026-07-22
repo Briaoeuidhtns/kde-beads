@@ -68,7 +68,7 @@ Kirigami.GlobalDrawer {
                     ? Controls.AbstractButton.IconOnly
                     : Controls.AbstractButton.TextBesideIcon
                 highlighted: modelData === projectSidebar.currentWorkspace
-                enabled: !projectSidebar.backendLoading && !projectSidebar.editorOpen
+                enabled: !projectSidebar.editorOpen
                 Accessible.description: modelData
                 Controls.ToolTip.text: modelData
                 Controls.ToolTip.visible: hovered

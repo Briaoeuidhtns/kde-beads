@@ -4,6 +4,7 @@ mod backend;
 mod dialogs;
 mod editor_request;
 mod operations;
+mod workspace_cache;
 
 use qtbridge::{QApp, include_bytes_qml};
 

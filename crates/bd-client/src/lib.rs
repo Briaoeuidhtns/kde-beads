@@ -223,13 +223,19 @@ impl Client {
     }
 
     pub fn list(&self) -> Result<Vec<Issue>, Error> {
-        let payload = self.run(true, &["list", "--json", "--all", "--limit", "0"])?;
+        let (payload, blocked_payload) = std::thread::scope(|scope| {
+            let blocked = scope.spawn(|| self.run(true, &["blocked", "--json"]));
+            let listed = self.run(true, &["list", "--json", "--all", "--limit", "0"]);
+            let blocked = blocked.join().unwrap_or(Err(Error::WorkerPanic("blocked")));
+            (listed, blocked)
+        });
+        let payload = payload?;
         let mut issues: Vec<Issue> =
             serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
                 operation: "list",
                 source,
             })?;
-        let payload = self.run(true, &["blocked", "--json"])?;
+        let payload = blocked_payload?;
         let blocked: Vec<BlockedIssue> =
             serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
                 operation: "blocked",
@@ -459,6 +465,7 @@ pub enum Error {
         operation: &'static str,
         count: usize,
     },
+    WorkerPanic(&'static str),
     Attachment(String),
 }
 
@@ -501,6 +508,9 @@ impl fmt::Display for Error {
                     formatter,
                     "bd {operation} returned {count} issues instead of one"
                 )
+            }
+            Self::WorkerPanic(operation) => {
+                write!(formatter, "bd {operation} worker stopped unexpectedly")
             }
             Self::Attachment(message) => formatter.write_str(message),
         }

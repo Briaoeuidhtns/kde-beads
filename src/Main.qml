@@ -88,7 +88,7 @@ Kirigami.ApplicationWindow {
     }
 
     function selectProject(path) {
-        if (Backend.loading || editorLayerOpen || path === Backend.workspace)
+        if (editorLayerOpen || path === Backend.workspace)
             return;
         Backend.switchWorkspace(path);
         if (projectSidebar.modal)
@@ -179,6 +179,7 @@ Kirigami.ApplicationWindow {
     pageStack.initialPage: BoardPage {
         issues: Backend.issues || []
         backendLoading: Backend.loading
+        backendRefreshing: Backend.refreshing
         backendErrorMessage: Backend.errorMessage
         workspace: Backend.workspace
         onCreateIssueRequested: root.openCreate()
