@@ -12,7 +12,7 @@ Item {
 
     Component {
         id: appComponent
-        App.Main {}
+        App.Main { projectPersistenceEnabled: false }
     }
 
     TestCase {

@@ -8,6 +8,7 @@ QtObject {
     property var issues: []
     property var detail: ({})
     property string workspace: "/tmp/kde-beads-tests"
+    property bool startupWorkspaceExplicit: false
     property string errorMessage: ""
     property bool loading: false
 
@@ -25,6 +26,8 @@ QtObject {
     property int previewAttachmentCallCount: 0
     property int removeAttachmentCallCount: 0
     property int migrateAttachmentsCallCount: 0
+    property int chooseWorkspaceCallCount: 0
+    property int switchWorkspaceCallCount: 0
     property string lastLoadedId: ""
     property string lastMovedId: ""
     property string lastMovedStatus: ""
@@ -38,6 +41,7 @@ QtObject {
     property string lastAttachmentIssueId: ""
     property string lastAttachmentId: ""
     property var lastAttachmentUrls: []
+    property string lastSwitchedWorkspace: ""
 
     signal issueSaved(string savedId)
     signal attachmentReady(string issueId, string path)
@@ -47,6 +51,7 @@ QtObject {
         issues = [];
         detail = {};
         workspace = "/tmp/kde-beads-tests";
+        startupWorkspaceExplicit = false;
         errorMessage = "";
         loading = false;
         reloadCallCount = 0;
@@ -63,6 +68,8 @@ QtObject {
         previewAttachmentCallCount = 0;
         removeAttachmentCallCount = 0;
         migrateAttachmentsCallCount = 0;
+        chooseWorkspaceCallCount = 0;
+        switchWorkspaceCallCount = 0;
         lastLoadedId = "";
         lastMovedId = "";
         lastMovedStatus = "";
@@ -76,6 +83,7 @@ QtObject {
         lastAttachmentIssueId = "";
         lastAttachmentId = "";
         lastAttachmentUrls = [];
+        lastSwitchedWorkspace = "";
     }
 
     function reload() {
@@ -154,7 +162,16 @@ QtObject {
         lastAttachmentIssueId = issueId;
     }
 
-    function chooseWorkspace() {}
+    function chooseWorkspace() {
+        chooseWorkspaceCallCount += 1;
+    }
+
+    function switchWorkspace(path) {
+        switchWorkspaceCallCount += 1;
+        lastSwitchedWorkspace = path;
+        workspace = path;
+        reload();
+    }
 
     function clearError() {
         errorMessage = "";

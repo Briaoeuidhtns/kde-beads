@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import QtQuick
+import QtQuick.Controls as Controls
 import QtTest
 import kde_beads
 import "../../src" as App
@@ -12,7 +13,7 @@ Item {
 
     Component {
         id: appComponent
-        App.Main {}
+        App.Main { projectPersistenceEnabled: false }
     }
 
     TestCase {
@@ -107,6 +108,7 @@ Item {
             const destination = findChild(app, "statusColumn-in_progress");
             verify(sourceList);
             verify(destination);
+            wait(300);
             tryCompare(sourceList, "count", 1);
             sourceList.positionViewAtIndex(0, ListView.Beginning);
             tryVerify(() => sourceList.itemAtIndex(0) !== null);
@@ -158,6 +160,95 @@ Item {
             const card = list.itemAtIndex(10);
 
             verify(card.width + scrollBar.width < list.width);
+        }
+
+        function test_project_sidebar_lists_adds_and_switches_projects() {
+            createApp([]);
+            const sidebar = findChild(app, "projectSidebar");
+            const list = findChild(app, "projectList");
+            const addButton = findChild(app, "addProjectButton");
+            verify(sidebar);
+            verify(list);
+            verify(addButton);
+            compare(sidebar.modal, false);
+            compare(sidebar.drawerOpen, true);
+            compare(sidebar.collapsible, true);
+            compare(list.count, 1);
+            compare(list.itemAt(0).text, "kde-beads-tests");
+            compare(list.itemAt(0).highlighted, true);
+
+            addButton.clicked();
+            compare(Backend.chooseWorkspaceCallCount, 1);
+
+            app.rememberProject("/tmp/another-project");
+            tryCompare(list, "count", 2);
+            tryVerify(() => list.itemAt(1) !== null);
+            list.itemAt(1).clicked();
+
+            compare(Backend.switchWorkspaceCallCount, 1);
+            compare(Backend.lastSwitchedWorkspace, "/tmp/another-project");
+            compare(Backend.workspace, "/tmp/another-project");
+            compare(list.itemAt(1).highlighted, true);
+        }
+
+        function test_project_sidebar_becomes_modal_on_narrow_windows() {
+            createApp([]);
+            const sidebar = findChild(app, "projectSidebar");
+
+            app.width = app.minimumWidth;
+
+            tryCompare(sidebar, "modal", true);
+            tryCompare(sidebar, "drawerOpen", false);
+            compare(sidebar.collapsible, false);
+            verify(sidebar.handleVisible);
+
+            app.width = 1280;
+
+            tryCompare(sidebar, "modal", false);
+            tryCompare(sidebar, "drawerOpen", true);
+            tryCompare(sidebar, "collapsible", true);
+        }
+
+        function test_project_sidebar_supports_collapsed_rail() {
+            createApp([]);
+            const sidebar = findChild(app, "projectSidebar");
+            const list = findChild(app, "projectList");
+            tryVerify(() => sidebar.implicitWidth > sidebar.collapsedSize);
+            const expandedWidth = sidebar.implicitWidth;
+
+            sidebar.collapsed = true;
+
+            tryCompare(sidebar, "collapsed", true);
+            tryVerify(() => sidebar.implicitWidth < expandedWidth);
+            compare(
+                list.itemAt(0).display,
+                Controls.AbstractButton.IconOnly
+            );
+        }
+
+        function test_project_switching_is_blocked_while_editing() {
+            createApp([]);
+            app.rememberProject("/tmp/another-project");
+            app.openCreate();
+            tryCompare(app, "editorLayerOpen", true);
+
+            app.selectProject("/tmp/another-project");
+
+            compare(Backend.switchWorkspaceCallCount, 0);
+        }
+
+        function test_project_paths_are_deduplicated() {
+            createApp([]);
+
+            compare(
+                JSON.stringify(app.normalizedProjects([
+                    "/tmp/one",
+                    "/tmp/one",
+                    "",
+                    " /tmp/two "
+                ])),
+                JSON.stringify(["/tmp/one", "/tmp/two"])
+            );
         }
     }
 }

@@ -16,6 +16,7 @@ struct Backend {
     issues: Vec<Value>,
     detail: Value,
     workspace: String,
+    startup_workspace_explicit: bool,
     error_message: String,
     loading: bool,
     polling: bool,
@@ -25,11 +26,12 @@ struct Backend {
 
 impl Default for Backend {
     fn default() -> Self {
-        let workspace = initial_workspace();
+        let (workspace, startup_workspace_explicit) = initial_workspace();
         Self {
             issues: Vec::new(),
             detail: json!({}),
             workspace: workspace.to_string_lossy().into_owned(),
+            startup_workspace_explicit,
             error_message: String::new(),
             loading: false,
             polling: false,
@@ -44,6 +46,11 @@ impl Backend {
     qproperty!("issues", Member = issues, Notify = issues_changed);
     qproperty!("detail", Member = detail, Notify = detail_changed);
     qproperty!("workspace", Member = workspace, Notify = workspace_changed);
+    qproperty!(
+        "startupWorkspaceExplicit",
+        Member = startup_workspace_explicit,
+        Constant
+    );
     qproperty!(
         "errorMessage",
         Member = error_message,
@@ -433,6 +440,34 @@ impl Backend {
     }
 
     #[qslot]
+    fn switch_workspace(&mut self, workspace: String) {
+        if self.loading || workspace.is_empty() {
+            return;
+        }
+        let workspace = match Client::new(&workspace) {
+            Ok(client) => client.workspace().to_string_lossy().into_owned(),
+            Err(error) => {
+                self.set_error(error.to_string());
+                return;
+            }
+        };
+        if self.workspace == workspace {
+            return;
+        }
+
+        self.polling = false;
+        self.discard_poll = true;
+        self.workspace = workspace;
+        self.workspace_changed();
+        self.issues.clear();
+        self.issues_changed();
+        self.detail = json!({});
+        self.detail_changed();
+        self.set_error(String::new());
+        self.reload();
+    }
+
+    #[qslot]
     fn clear_error(&mut self) {
         self.set_error(String::new());
     }
@@ -634,22 +669,7 @@ impl Backend {
         if workspace.is_empty() {
             return;
         }
-
-        match Client::new(&workspace) {
-            Ok(client) => {
-                let workspace = client.workspace().to_string_lossy().into_owned();
-                if self.workspace != workspace {
-                    self.workspace = workspace;
-                    self.workspace_changed();
-                }
-                self.issues.clear();
-                self.issues_changed();
-                self.detail = json!({});
-                self.detail_changed();
-                self.reload();
-            }
-            Err(error) => self.set_error(error.to_string()),
-        }
+        self.switch_workspace(workspace);
     }
 
     fn finish_mutation(&mut self, payload: String, error: String) -> Option<String> {
@@ -1025,15 +1045,18 @@ fn replace_if_changed<T: PartialEq>(current: &mut T, replacement: T) -> bool {
     true
 }
 
-fn initial_workspace() -> PathBuf {
-    std::env::args_os()
+fn initial_workspace() -> (PathBuf, bool) {
+    let explicit = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
-        .filter(|path| path.is_dir())
+        .filter(|path| path.is_dir());
+    let workspace = explicit
+        .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."))
         .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from("."))
+        .unwrap_or_else(|_| PathBuf::from("."));
+    (workspace, explicit.is_some())
 }
 
 fn encode_result<T: Serialize, E: Display>(result: Result<T, E>) -> (String, String) {
@@ -1051,6 +1074,7 @@ fn encode_result<T: Serialize, E: Display>(result: Result<T, E>) -> (String, Str
 
 fn main() {
     QApp::new()
+        .application_name("kde-beads")
         .register::<Backend>()
         .load_qml(include_bytes!("Main.qml"))
         .run();

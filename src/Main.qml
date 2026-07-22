@@ -5,6 +5,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
+import QtCore
 import org.kde.kirigami as Kirigami
 import org.kde.kquickcontrolsaddons as KQuickControlsAddons
 import kde_beads
@@ -20,6 +21,21 @@ Kirigami.ApplicationWindow {
     visible: true
     title: qsTr("Beads")
 
+    property bool projectPersistenceEnabled: true
+    property var knownProjects: []
+    property bool projectsInitialized: false
+    readonly property bool editorLayerOpen: Boolean(pageStack.layers.currentItem
+        && pageStack.layers.currentItem.objectName === "editorPage")
+
+    Settings {
+        id: projectSettings
+        category: "Projects"
+        location: StandardPaths.writableLocation(StandardPaths.AppConfigLocation)
+            + "/projects.ini"
+        property string knownProjectsJson: ""
+        property string activeProject: ""
+    }
+
     Timer {
         objectName: "changePollTimer"
         interval: 2000
@@ -31,6 +47,92 @@ Kirigami.ApplicationWindow {
     KQuickControlsAddons.Clipboard {
         id: attachmentClipboard
         objectName: "attachmentClipboard"
+    }
+
+    function normalizedProjects(projects) {
+        const result = [];
+        for (const project of projects || []) {
+            const path = String(project || "").trim();
+            if (path.length > 0 && !result.includes(path))
+                result.push(path);
+        }
+        return result;
+    }
+
+    function storedProjects() {
+        if (!projectPersistenceEnabled || projectSettings.knownProjectsJson.length === 0)
+            return [];
+        try {
+            const stored = JSON.parse(projectSettings.knownProjectsJson);
+            return normalizedProjects(stored && stored.version === 1 ? stored.paths : []);
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function persistProjects(activeProject) {
+        if (!projectPersistenceEnabled)
+            return;
+        projectSettings.knownProjectsJson = JSON.stringify({
+            "version": 1,
+            "paths": knownProjects
+        });
+        projectSettings.activeProject = String(activeProject || "");
+        projectSettings.sync();
+    }
+
+    function rememberProject(path) {
+        const projects = normalizedProjects(knownProjects.concat([path]));
+        if (projects.length !== knownProjects.length)
+            knownProjects = projects;
+        if (projectsInitialized)
+            persistProjects(Backend.workspace);
+    }
+
+    function projectName(path) {
+        const parts = String(path || "").split("/").filter(part => part.length > 0);
+        return parts.length > 0 ? parts[parts.length - 1] : String(path || "");
+    }
+
+    function selectProject(path) {
+        if (Backend.loading || editorLayerOpen || path === Backend.workspace)
+            return;
+        Backend.switchWorkspace(path);
+        if (projectSidebar.modal)
+            projectSidebar.close();
+    }
+
+    function initializeProjects() {
+        const startupProject = String(Backend.workspace);
+        const projects = storedProjects();
+        const savedProject = String(projectSettings.activeProject || "");
+        const preferredProject = !Backend.startupWorkspaceExplicit
+                && projects.includes(savedProject)
+            ? savedProject
+            : startupProject;
+        knownProjects = normalizedProjects(projects.concat([preferredProject]));
+        projectsInitialized = true;
+
+        persistProjects(preferredProject);
+        if (preferredProject !== startupProject) {
+            Backend.switchWorkspace(preferredProject);
+            if (Backend.workspace === startupProject) {
+                persistProjects(startupProject);
+                Backend.reload();
+            }
+        } else {
+            Backend.reload();
+        }
+    }
+
+    Component.onCompleted: initializeProjects()
+
+    Connections {
+        target: Backend
+
+        function onWorkspaceChanged() {
+            root.rememberProject(Backend.workspace);
+        }
     }
 
     function issuesForStatus(status) {
@@ -1558,6 +1660,81 @@ Kirigami.ApplicationWindow {
         BeadEditorPage {}
     }
 
+    pageStack.leftSidebar: Kirigami.GlobalDrawer {
+        id: projectSidebar
+        objectName: "projectSidebar"
+        title: qsTr("Projects")
+        titleIcon: "folder"
+        modal: root.width < Kirigami.Units.gridUnit * 48
+        preferredSize: Kirigami.Units.gridUnit * 15
+        minimumSize: Kirigami.Units.gridUnit * 12
+        maximumSize: Kirigami.Units.gridUnit * 22
+        handleClosedToolTip: qsTr("Show projects")
+        handleOpenToolTip: qsTr("Hide projects")
+        isMenu: false
+        collapsible: !modal
+        showContentWhenCollapsed: true
+
+        Component.onCompleted: {
+            collapsible = !modal;
+            drawerOpen = !modal;
+        }
+        onModalChanged: Qt.callLater(() => {
+            collapsed = false;
+            collapsible = !modal;
+            drawerOpen = !modal;
+        })
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
+
+            Repeater {
+                id: projectList
+                objectName: "projectList"
+                model: root.knownProjects
+
+                delegate: Controls.ItemDelegate {
+                    required property string modelData
+                    required property int index
+                    objectName: `projectItem-${index}`
+                    Layout.fillWidth: true
+                    text: root.projectName(modelData)
+                    icon.name: modelData === Backend.workspace ? "folder-open" : "folder"
+                    display: projectSidebar.collapsed
+                        ? Controls.AbstractButton.IconOnly
+                        : Controls.AbstractButton.TextBesideIcon
+                    highlighted: modelData === Backend.workspace
+                    enabled: !Backend.loading && !root.editorLayerOpen
+                    Accessible.description: modelData
+                    Controls.ToolTip.text: modelData
+                    Controls.ToolTip.visible: hovered
+                    onClicked: root.selectProject(modelData)
+                }
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+            }
+        }
+
+        footer: Controls.ToolBar {
+            contentItem: Controls.ToolButton {
+                id: addProjectButton
+                objectName: "addProjectButton"
+                text: qsTr("Add Project")
+                icon.name: "folder-new"
+                display: projectSidebar.collapsed
+                    ? Controls.AbstractButton.IconOnly
+                    : Controls.AbstractButton.TextBesideIcon
+                enabled: !Backend.loading && !root.editorLayerOpen
+                onClicked: Backend.chooseWorkspace()
+            }
+        }
+    }
+
     pageStack.initialPage: Kirigami.Page {
         id: boardPage
         objectName: "boardPage"
@@ -1574,12 +1751,6 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.openCreate()
             },
             Kirigami.Action {
-                text: qsTr("Open Workspace")
-                icon.name: "folder-open"
-                enabled: !Backend.loading
-                onTriggered: Backend.chooseWorkspace()
-            },
-            Kirigami.Action {
                 text: qsTr("Refresh")
                 icon.name: "view-refresh"
                 enabled: !Backend.loading
@@ -1587,8 +1758,6 @@ Kirigami.ApplicationWindow {
                 onTriggered: Backend.reload()
             }
         ]
-
-        Component.onCompleted: Backend.reload()
 
         ColumnLayout {
             anchors.fill: parent
