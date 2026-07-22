@@ -99,6 +99,29 @@ Kirigami.ScrollablePage {
         return Math.max(0, index);
     }
 
+    function typeOptions() {
+        const options = [
+            { "text": qsTr("Bug"), "value": "bug" },
+            { "text": qsTr("Feature"), "value": "feature" },
+            { "text": qsTr("Task"), "value": "task" },
+            { "text": qsTr("Epic"), "value": "epic" },
+            { "text": qsTr("Chore"), "value": "chore" },
+            { "text": qsTr("Decision"), "value": "decision" }
+        ];
+        const currentType = String(localDetail.issue_type || "");
+        if (!creating
+                && currentType.length > 0
+                && !options.some(option => option.value === currentType)) {
+            options.push({ "text": currentType, "value": currentType });
+        }
+        return options;
+    }
+
+    function typeIndex(issueType) {
+        const index = typeOptions().findIndex(option => option.value === issueType);
+        return Math.max(0, index);
+    }
+
     function populate() {
         if (creating)
             return;
@@ -112,7 +135,7 @@ Kirigami.ScrollablePage {
         notesField.text = issue.notes || "";
         statusField.currentIndex = statusIndex(issue.status);
         priorityField.currentIndex = issue.priority ?? 2;
-        typeField.editText = issue.issue_type || "task";
+        typeField.currentIndex = typeIndex(issue.issue_type || "task");
         assigneeField.text = issue.assignee || "";
         labelsField.text = issue.labels ? issue.labels.join(", ") : "";
     }
@@ -121,7 +144,6 @@ Kirigami.ScrollablePage {
         statusField.currentIndex = 0;
         priorityField.currentIndex = 2;
         typeField.currentIndex = 2;
-        typeField.editText = "task";
         titleField.forceActiveFocus();
     }
 
@@ -273,7 +295,7 @@ Kirigami.ScrollablePage {
             "notes": notesField.text,
             "status": statusField.currentValue,
             "priority": String(priorityField.currentIndex),
-            "issueType": typeField.editText,
+            "issueType": typeField.currentValue,
             "assignee": assigneeField.text,
             "labels": labelsField.text,
             "parentId": parentId
@@ -296,7 +318,7 @@ Kirigami.ScrollablePage {
             objectName: "createChildAction"
             text: qsTr("Create child ticket")
             icon.name: "list-add"
-            visible: !editor.creating && typeField.editText === "epic"
+            visible: !editor.creating && typeField.currentValue === "epic"
             enabled: !editor.backend.loading
             onTriggered: editor.createChildRequested(editor.issueId)
         }
@@ -546,10 +568,9 @@ Kirigami.ScrollablePage {
                 objectName: "typeField"
                 Kirigami.FormData.label: qsTr("Type:")
                 implicitWidth: editor.formFieldWidth
-                editable: true
-                model: ["bug", "feature", "task", "epic", "chore", "decision"]
-                Keys.priority: Keys.BeforeItem
-                Keys.onPressed: event => editor.handlePasteEvent(event)
+                textRole: "text"
+                valueRole: "value"
+                model: editor.typeOptions()
             }
 
             Controls.TextField {

@@ -67,6 +67,7 @@ Item {
             createApp();
             const editor = openCreateEditor();
             const statusField = findChild(editor, "statusField");
+            const typeField = findChild(editor, "typeField");
             findChild(editor, "titleField").text = "Test-created issue";
             findChild(editor, "descriptionField").text = "Created in Qt Quick Test";
             findChild(editor, "labelsField").text = "qml, kde";
@@ -74,6 +75,9 @@ Item {
             compare(statusField.count, 4);
             for (let index = 0; index < statusField.count; ++index)
                 verify(statusField.valueAt(index) !== "blocked");
+            compare(typeField.editable, false);
+            compare(typeField.count, 6);
+            compare(typeField.currentValue, "task");
 
             editor.save();
 
@@ -83,7 +87,35 @@ Item {
             compare(Backend.lastCreatedRequest.labels, "qml, kde");
             compare(Backend.lastCreatedRequest.status, "open");
             compare(Backend.lastCreatedRequest.priority, "2");
+            compare(Backend.lastCreatedRequest.issueType, "task");
             compare(Backend.lastCreatedRequest.parentId, "");
+        }
+
+        function test_existing_custom_type_is_preserved_as_a_static_option() {
+            Backend.issues = [issue("test-custom-type", "open")];
+            Backend.detail = {
+                "id": "test-custom-type",
+                "title": "Custom type issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "incident",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-custom-type");
+            const editor = findChild(app, "editorPage");
+            const typeField = findChild(editor, "typeField");
+
+            compare(typeField.editable, false);
+            compare(typeField.count, 7);
+            compare(typeField.currentValue, "incident");
+            editor.save();
+
+            compare(Backend.lastSavedRequest.issueType, "incident");
         }
 
         function test_legacy_blocked_status_is_preserved_on_save() {
