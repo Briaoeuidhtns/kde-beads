@@ -295,6 +295,25 @@ Item {
             verify(findChild(app, "editorPage"));
         }
 
+        function test_existing_issue_id_can_be_copied() {
+            mouseMove(testRoot, testRoot.width - 1, testRoot.height - 1);
+            createApp();
+            app.openEditor("test-existing");
+            const copyButton = findChild(app, "editorIssueCopyButton");
+            const clipboard = findChild(app, "attachmentClipboard");
+            verify(copyButton);
+            verify(clipboard);
+            compare(copyButton.hovered, false);
+
+            copyButton.clicked();
+
+            compare(clipboard.content, "test-existing");
+            compare(copyButton.icon.name, "dialog-ok");
+            wait(750);
+            compare(copyButton.icon.name, "dialog-ok");
+            tryCompare(copyButton.icon, "name", "edit-copy");
+        }
+
         function test_existing_issue_exposes_attachment_actions() {
             Backend.detail = {
                 "id": "test-existing",

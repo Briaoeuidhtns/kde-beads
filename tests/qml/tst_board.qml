@@ -162,6 +162,26 @@ Item {
             verify(card.width + scrollBar.width < list.width);
         }
 
+        function test_card_issue_id_can_be_copied_without_opening_editor() {
+            createApp([issue("test-copy", "open")]);
+            const list = findChild(app, "cardList-open");
+            const clipboard = findChild(app, "attachmentClipboard");
+            verify(list);
+            verify(clipboard);
+            tryVerify(() => list.itemAtIndex(0) !== null);
+            const copyButton = findChild(
+                list.itemAtIndex(0),
+                "issueCopyButton-test-copy"
+            );
+            verify(copyButton);
+
+            mouseClick(copyButton);
+
+            compare(clipboard.content, "test-copy");
+            compare(copyButton.icon.name, "dialog-ok");
+            compare(findChild(app, "editorPage"), null);
+        }
+
         function test_project_sidebar_lists_adds_and_switches_projects() {
             createApp([]);
             const sidebar = findChild(app, "projectSidebar");

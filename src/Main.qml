@@ -183,6 +183,10 @@ Kirigami.ApplicationWindow {
         return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
     }
 
+    function copyIssueId(issueId) {
+        attachmentClipboard.content = String(issueId || "");
+    }
+
     function localFileUrl(path) {
         return "file://" + String(path).split("/").map(encodeURIComponent).join("/");
     }
@@ -200,6 +204,42 @@ Kirigami.ApplicationWindow {
             "creating": true,
             "parentId": String(parentId || "")
         });
+    }
+
+    component IssueCopyButton: Controls.ToolButton {
+        id: copyButton
+
+        required property string issueId
+        property bool copied: false
+        property bool minimumFeedbackElapsed: false
+
+        text: qsTr("Copy %1").arg(issueId)
+        icon.name: copied ? "dialog-ok" : "edit-copy"
+        display: Controls.AbstractButton.IconOnly
+        Controls.ToolTip.text: copied ? qsTr("Copied") : qsTr("Copy issue ID")
+        Controls.ToolTip.visible: hovered
+
+        function finishFeedbackIfReady() {
+            if (minimumFeedbackElapsed && !hovered)
+                copied = false;
+        }
+
+        onClicked: {
+            root.copyIssueId(issueId);
+            copied = true;
+            minimumFeedbackElapsed = false;
+            feedbackTimer.restart();
+        }
+        onHoveredChanged: finishFeedbackIfReady()
+
+        Timer {
+            id: feedbackTimer
+            interval: 1000
+            onTriggered: {
+                copyButton.minimumFeedbackElapsed = true;
+                copyButton.finishFeedbackIfReady();
+            }
+        }
     }
 
     Item {
@@ -334,6 +374,7 @@ Kirigami.ApplicationWindow {
                     contentItem: ColumnLayout {
                         id: cardContent
                         spacing: Kirigami.Units.smallSpacing
+                        z: 2
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -347,6 +388,13 @@ Kirigami.ApplicationWindow {
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
+                            }
+                            IssueCopyButton {
+                                objectName: `issueCopyButton-${card.issueId}`
+                                issueId: card.issueId
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                                Layout.preferredHeight: Layout.preferredWidth
+                                z: 2
                             }
                             Controls.Label {
                                 text: `P${card.modelData.priority ?? 2}`
@@ -990,6 +1038,11 @@ Kirigami.ApplicationWindow {
                     color: Kirigami.Theme.highlightColor
                     font.family: "monospace"
                     font.weight: Font.Bold
+                }
+                IssueCopyButton {
+                    objectName: "editorIssueCopyButton"
+                    visible: !editor.creating
+                    issueId: editor.issueId
                 }
                 Controls.Label {
                     visible: editor.creating && editor.parentId.length > 0
