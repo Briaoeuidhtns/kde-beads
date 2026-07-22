@@ -525,9 +525,50 @@ Kirigami.ApplicationWindow {
             return incoming ? qsTr("Dependent") : qsTr("Depends on");
         }
 
-        function addRelationship() {
-            const targetId = relationshipTargetField.text.trim();
+        function relationshipTargetAllowed(targetId) {
             if (targetId.length === 0 || targetId === issueId)
+                return false;
+            return !dependencies.some(issue => String(issue.id) === targetId)
+                && !dependents.some(issue => String(issue.id) === targetId);
+        }
+
+        function relationshipChoiceLabel(issue) {
+            const title = String(issue.title || "").trim();
+            return title.length > 0 ? `${issue.id} - ${title}` : String(issue.id);
+        }
+
+        function relationshipCandidates(query) {
+            const normalized = String(query || "").trim().toLowerCase();
+            return (Backend.issues || [])
+                .filter(issue => {
+                    const targetId = String(issue.id || "");
+                    if (!relationshipTargetAllowed(targetId))
+                        return false;
+                    if (normalized.length === 0)
+                        return true;
+                    return targetId.toLowerCase().includes(normalized)
+                        || String(issue.title || "").toLowerCase().includes(normalized);
+                })
+                .slice(0, 8)
+                .map(issue => ({
+                    "id": String(issue.id),
+                    "label": relationshipChoiceLabel(issue)
+                }));
+        }
+
+        function relationshipTargetId() {
+            const value = relationshipTargetField.text.trim();
+            const issue = (Backend.issues || []).find(candidate => {
+                const targetId = String(candidate.id || "");
+                return targetId === value || relationshipChoiceLabel(candidate) === value;
+            });
+            const targetId = issue ? String(issue.id) : "";
+            return relationshipTargetAllowed(targetId) ? targetId : "";
+        }
+
+        function addRelationship() {
+            const targetId = relationshipTargetId();
+            if (targetId.length === 0)
                 return;
             preserveFieldsWhileLoading = true;
             Backend.addDependency(issueId, targetId, relationshipTypeField.currentValue);
@@ -1014,17 +1055,127 @@ Kirigami.ApplicationWindow {
                             id: relationshipTargetField
                             objectName: "relationshipTargetField"
                             Layout.fillWidth: true
-                            placeholderText: qsTr("Issue ID")
-                            onAccepted: editor.addRelationship()
+                            property var candidates: editor.relationshipCandidates(text)
+                            placeholderText: qsTr("Search issue ID or title")
+                            Accessible.description: qsTr("Search issues by ID or title")
+
+                            function updateSuggestions() {
+                                relationshipSuggestionList.currentIndex = 0;
+                                if (activeFocus
+                                        && text.trim().length > 0
+                                        && candidates.length > 0
+                                        && editor.relationshipTargetId().length === 0) {
+                                    relationshipSuggestions.open();
+                                } else {
+                                    relationshipSuggestions.close();
+                                }
+                            }
+
+                            onTextChanged: Qt.callLater(updateSuggestions)
+                            onActiveFocusChanged: Qt.callLater(updateSuggestions)
+                            onAccepted: {
+                                if (editor.relationshipTargetId().length > 0) {
+                                    editor.addRelationship();
+                                } else if (candidates.length > 0) {
+                                    const index = Math.max(0, relationshipSuggestionList.currentIndex);
+                                    text = candidates[index].id;
+                                    relationshipSuggestions.close();
+                                }
+                            }
+
+                            Keys.onDownPressed: event => {
+                                if (candidates.length === 0)
+                                    return;
+                                relationshipSuggestionList.currentIndex = Math.min(
+                                    candidates.length - 1,
+                                    relationshipSuggestionList.currentIndex + 1
+                                );
+                                relationshipSuggestions.open();
+                                event.accepted = true;
+                            }
+                            Keys.onUpPressed: event => {
+                                if (candidates.length === 0)
+                                    return;
+                                relationshipSuggestionList.currentIndex = Math.max(
+                                    0,
+                                    relationshipSuggestionList.currentIndex - 1
+                                );
+                                relationshipSuggestions.open();
+                                event.accepted = true;
+                            }
+
+                            TapHandler {
+                                onTapped: Qt.callLater(relationshipTargetField.updateSuggestions)
+                            }
                         }
-                        Controls.Button {
-                            objectName: "addRelationshipButton"
-                            text: qsTr("Add")
-                            icon.name: "list-add"
-                            enabled: !Backend.loading
-                                && relationshipTargetField.text.trim().length > 0
-                                && relationshipTargetField.text.trim() !== editor.issueId
-                            onClicked: editor.addRelationship()
+
+                        Item {
+                            Layout.preferredWidth: addRelationshipButton.implicitWidth
+                            Layout.preferredHeight: addRelationshipButton.implicitHeight
+                            Controls.ToolTip.visible: addRelationshipHover.hovered
+                                && !addRelationshipButton.enabled
+                            Controls.ToolTip.text: relationshipTargetField.candidates.length > 0
+                                ? qsTr("Select an issue from the suggestions")
+                                : qsTr("No unlinked issue matches this search")
+
+                            HoverHandler {
+                                id: addRelationshipHover
+                            }
+
+                            Controls.Button {
+                                id: addRelationshipButton
+                                objectName: "addRelationshipButton"
+                                anchors.fill: parent
+                                text: qsTr("Add")
+                                icon.name: "list-add"
+                                enabled: !Backend.loading
+                                    && editor.relationshipTargetId().length > 0
+                                onClicked: editor.addRelationship()
+                            }
+                        }
+                    }
+
+                    Controls.Popup {
+                        id: relationshipSuggestions
+                        objectName: "relationshipSuggestions"
+                        parent: relationshipTargetField
+                        x: 0
+                        y: relationshipTargetField.height
+                        width: relationshipTargetField.width
+                        padding: 0
+                        focus: false
+                        modal: false
+                        closePolicy: Controls.Popup.CloseOnEscape
+                            | Controls.Popup.CloseOnPressOutsideParent
+
+                        contentItem: ListView {
+                            id: relationshipSuggestionList
+                            objectName: "relationshipSuggestionList"
+                            implicitHeight: Math.min(
+                                contentHeight,
+                                Kirigami.Units.gridUnit * 16
+                            )
+                            model: relationshipTargetField.candidates
+                            currentIndex: 0
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            Controls.ScrollBar.vertical: Controls.ScrollBar {}
+
+                            delegate: Controls.ItemDelegate {
+                                required property var modelData
+                                required property int index
+                                width: ListView.view.width
+                                text: modelData.label
+                                icon.name: "task-complete"
+                                highlighted: ListView.isCurrentItem
+
+                                onClicked: {
+                                    relationshipSuggestionList.currentIndex = index;
+                                    relationshipTargetField.text = modelData.id;
+                                    relationshipSuggestions.close();
+                                    relationshipTargetField.forceActiveFocus();
+                                }
+                            }
                         }
                     }
                 }

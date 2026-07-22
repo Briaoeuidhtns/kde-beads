@@ -22,6 +22,19 @@ Item {
 
         property var app: null
 
+        function issue(issueId, status) {
+            return {
+                "id": issueId,
+                "title": `Issue ${issueId}`,
+                "description": "",
+                "status": status,
+                "priority": 2,
+                "issue_type": "task",
+                "assignee": "",
+                "labels": []
+            };
+        }
+
         function createApp() {
             app = createTemporaryObject(appComponent, testRoot, { "visible": true });
             verify(app, "application window should load");
@@ -113,6 +126,13 @@ Item {
         }
 
         function test_existing_issue_adds_relationship() {
+            const searchableIssue = issue("test-other", "open");
+            searchableIssue.title = "Another searchable issue";
+            Backend.issues = [
+                issue("test-existing", "open"),
+                issue("test-blocker", "open"),
+                searchableIssue
+            ];
             Backend.detail = {
                 "id": "test-existing",
                 "title": "Existing issue",
@@ -127,7 +147,30 @@ Item {
             app.openEditor("test-existing");
             tryVerify(() => findChild(app, "editorPage") !== null);
             const editor = findChild(app, "editorPage");
-            findChild(editor, "relationshipTargetField").text = "test-blocker";
+            editor.detailReady = true;
+            const targetField = findChild(editor, "relationshipTargetField");
+            const suggestions = findChild(app, "relationshipSuggestions");
+            const suggestionList = findChild(app, "relationshipSuggestionList");
+            const addButton = findChild(editor, "addRelationshipButton");
+
+            targetField.forceActiveFocus();
+            targetField.text = "searchable";
+            compare(targetField.candidates.length, 1);
+            compare(targetField.candidates[0].id, "test-other");
+            tryCompare(suggestions, "opened", true);
+            compare(suggestions.parent, targetField);
+            compare(suggestions.x, 0);
+            compare(suggestions.y, targetField.height);
+            compare(suggestionList.currentIndex, 0);
+            compare(addButton.enabled, false);
+
+            targetField.text = "missing-issue";
+            compare(targetField.candidates.length, 0);
+            compare(addButton.enabled, false);
+
+            targetField.text = "test-blocker";
+            tryCompare(suggestions, "opened", false);
+            compare(addButton.enabled, true);
 
             editor.addRelationship();
 
