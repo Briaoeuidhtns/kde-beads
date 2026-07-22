@@ -125,6 +125,24 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 <!-- END BEADS INTEGRATION -->
 
+## Working with KDE Beads Attachments
+
+Before searching home, Downloads, or screenshot directories for an attachment, inspect the issue:
+
+```bash
+bd show <issue-id> --json
+```
+
+Polyfill attachments are stored in metadata keys named `kde_beads.attachment_<sha256>`. The metadata value may itself be a JSON string. Its `storage_relpath` is relative to the workspace's `.beads` directory, so resolve it as:
+
+```text
+<workspace>/.beads/<storage_relpath>
+```
+
+For example, `kde-beads/attachments/bd-123/abc...` resolves to `.beads/kde-beads/attachments/bd-123/abc...` in this repository. Use `original_filename` for the display name; the stored blob is hash-named and may have no extension.
+
+Attachment metadata syncs through Dolt, but polyfill bytes do not. If the resolved blob is absent, report that it is unavailable on this machine instead of guessing another local path.
+
 
 ## Build & Test
 
