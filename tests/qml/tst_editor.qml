@@ -68,6 +68,37 @@ Item {
             compare(Backend.lastCreatedRequest.parentId, "");
         }
 
+        function test_created_issue_stays_open_as_persisted_editor() {
+            createApp();
+            const editor = openCreateEditor();
+            compare(editor.persisted, false);
+            compare(findChild(editor, "attachmentsSection").visible, true);
+            compare(findChild(editor, "relationshipsSection").visible, true);
+            compare(findChild(editor, "commentsSection").visible, false);
+            compare(findChild(editor, "addAttachmentButton").enabled, false);
+            Backend.detail = {
+                "id": "test-created",
+                "title": "Created issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+
+            Backend.issueSaved("test-created");
+
+            compare(editor.creating, false);
+            compare(editor.persisted, true);
+            compare(editor.issueId, "test-created");
+            compare(findChild(editor, "commentsSection").visible, true);
+            compare(Backend.lastLoadedId, "test-created");
+            compare(app.pageStack.layers.currentItem, editor);
+        }
+
         function test_child_editor_submits_epic_parent() {
             createApp();
             app.openCreate("test-epic");

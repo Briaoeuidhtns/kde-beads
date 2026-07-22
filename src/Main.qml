@@ -433,8 +433,11 @@ Kirigami.ApplicationWindow {
         property bool detailLoadRequested: false
         property bool detailReady: false
         property bool commentSubmitting: false
+        property bool refreshWhenCurrent: false
+        property bool hydratingCreatedIssue: false
         property var localDetail: ({})
         property alias commentDraft: commentField.text
+        readonly property bool persisted: !creating && issueId.length > 0
         readonly property var relationshipDetail: localDetail
         readonly property var dependencies: relationshipDetail.dependencies || []
         readonly property var dependents: relationshipDetail.dependents || []
@@ -583,7 +586,6 @@ Kirigami.ApplicationWindow {
 
         Connections {
             target: Backend
-            enabled: editor.visible
 
             function onAttachmentReady(issueId, path) {
                 if (issueId === editor.issueId)
@@ -608,6 +610,7 @@ Kirigami.ApplicationWindow {
                         editor.detailReady = true;
                     }
                     editor.detailLoadRequested = false;
+                    editor.hydratingCreatedIssue = false;
                     if (editor.commentSubmitting) {
                         if (Backend.errorMessage.length === 0)
                             commentField.clear();
@@ -621,10 +624,34 @@ Kirigami.ApplicationWindow {
             }
 
             function onIssueSaved(savedId) {
-                if (editor.creating || savedId === editor.issueId)
+                if (editor.creating
+                        && root.pageStack.layers.currentItem === editor) {
+                    editor.issueId = savedId;
+                    editor.creating = false;
+                    editor.parentId = "";
+                    editor.localDetail = Backend.detail;
+                    editor.populate();
+                    editor.hydratingCreatedIssue = true;
+                    editor.requestDetail();
+                } else if (savedId === editor.issueId) {
                     root.pageStack.layers.pop();
-                else
+                } else if (root.pageStack.layers.currentItem === editor) {
                     Backend.loadIssue(editor.issueId);
+                } else {
+                    editor.refreshWhenCurrent = true;
+                }
+            }
+        }
+
+        Connections {
+            target: root.pageStack.layers
+
+            function onCurrentItemChanged() {
+                if (root.pageStack.layers.currentItem === editor
+                        && editor.refreshWhenCurrent) {
+                    editor.refreshWhenCurrent = false;
+                    editor.requestDetail();
+                }
             }
         }
 
@@ -740,7 +767,13 @@ Kirigami.ApplicationWindow {
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
-                    visible: !editor.creating
+                    Controls.ToolTip.visible: editor.creating && attachmentHover.hovered
+                    Controls.ToolTip.text: qsTr("Create the ticket before attaching files")
+
+                    HoverHandler {
+                        id: attachmentHover
+                        enabled: editor.creating
+                    }
 
                     Repeater {
                         objectName: "attachmentsRepeater"
@@ -825,14 +858,16 @@ Kirigami.ApplicationWindow {
                     }
 
                     Controls.BusyIndicator {
-                        visible: !editor.detailReady
+                        visible: editor.persisted
+                            && !editor.detailReady
+                            && !editor.hydratingCreatedIssue
                         running: visible
                         implicitWidth: Kirigami.Units.iconSizes.smallMedium
                         implicitHeight: implicitWidth
                     }
 
                     Controls.Label {
-                        visible: editor.detailReady
+                        visible: (editor.detailReady || editor.hydratingCreatedIssue)
                             && (!editor.localDetail.attachments
                                 || editor.localDetail.attachments.length === 0)
                         text: qsTr("No attachments")
@@ -845,7 +880,7 @@ Kirigami.ApplicationWindow {
                             objectName: "addAttachmentButton"
                             text: qsTr("Attach file")
                             icon.name: "mail-attachment"
-                            enabled: !Backend.loading
+                            enabled: editor.persisted && !Backend.loading
                             onClicked: {
                                 editor.preserveFieldsWhileLoading = true;
                                 Backend.addAttachment(editor.issueId);
@@ -873,20 +908,28 @@ Kirigami.ApplicationWindow {
                     objectName: "relationshipsSection"
                     Kirigami.FormData.label: qsTr("Relationships:")
                     Kirigami.FormData.labelAlignment: Qt.AlignTop
-                    visible: !editor.creating
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
+                    Controls.ToolTip.visible: editor.creating && relationshipHover.hovered
+                    Controls.ToolTip.text: qsTr("Create the ticket before linking issues")
+
+                    HoverHandler {
+                        id: relationshipHover
+                        enabled: editor.creating
+                    }
 
                     Controls.BusyIndicator {
-                        visible: !editor.detailReady
+                        visible: editor.persisted
+                            && !editor.detailReady
+                            && !editor.hydratingCreatedIssue
                         running: visible
                         implicitWidth: Kirigami.Units.iconSizes.smallMedium
                         implicitHeight: implicitWidth
                     }
 
                     Controls.Label {
-                        visible: editor.detailReady
+                        visible: (editor.detailReady || editor.hydratingCreatedIssue)
                             && editor.dependencies.length === 0
                             && editor.dependents.length === 0
                         text: qsTr("No linked issues")
@@ -923,6 +966,7 @@ Kirigami.ApplicationWindow {
 
                     RowLayout {
                         Layout.fillWidth: true
+                        enabled: editor.persisted && editor.detailReady && !Backend.loading
 
                         Controls.ComboBox {
                             id: relationshipTypeField
@@ -1018,7 +1062,7 @@ Kirigami.ApplicationWindow {
                     objectName: "commentsSection"
                     Kirigami.FormData.label: qsTr("Comments:")
                     Kirigami.FormData.labelAlignment: Qt.AlignTop
-                    visible: !editor.creating
+                    visible: editor.persisted
                     implicitWidth: editor.formFieldWidth
                     Layout.fillWidth: true
                     Layout.topMargin: Kirigami.Units.gridUnit
@@ -1030,7 +1074,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Controls.BusyIndicator {
-                        visible: !editor.detailReady
+                        visible: editor.persisted && !editor.detailReady
                         running: visible
                         implicitWidth: Kirigami.Units.iconSizes.smallMedium
                         implicitHeight: implicitWidth
@@ -1086,6 +1130,7 @@ Kirigami.ApplicationWindow {
                         implicitHeight: Kirigami.Units.gridUnit * 5
                         wrapMode: TextEdit.Wrap
                         placeholderText: qsTr("Add a comment")
+                        enabled: editor.persisted && editor.detailReady && !Backend.loading
                     }
 
                     RowLayout {
