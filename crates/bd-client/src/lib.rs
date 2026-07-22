@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -60,6 +60,13 @@ pub struct Issue {
     pub native_attachments_supported: bool,
     #[serde(default)]
     pub polyfill_attachment_count: usize,
+    #[serde(default)]
+    pub is_blocked: bool,
+}
+
+#[derive(Deserialize)]
+struct BlockedIssue {
+    id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -217,10 +224,22 @@ impl Client {
 
     pub fn list(&self) -> Result<Vec<Issue>, Error> {
         let payload = self.run(true, &["list", "--json", "--all", "--limit", "0"])?;
-        serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
-            operation: "list",
-            source,
-        })
+        let mut issues: Vec<Issue> =
+            serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+                operation: "list",
+                source,
+            })?;
+        let payload = self.run(true, &["blocked", "--json"])?;
+        let blocked: Vec<BlockedIssue> =
+            serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+                operation: "blocked",
+                source,
+            })?;
+        let blocked_ids: BTreeSet<_> = blocked.into_iter().map(|issue| issue.id).collect();
+        for issue in &mut issues {
+            issue.is_blocked = blocked_ids.contains(&issue.id);
+        }
+        Ok(issues)
     }
 
     pub fn show(&self, id: &str) -> Result<Issue, Error> {
@@ -517,6 +536,7 @@ mod tests {
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].status, Status::InProgress);
         assert_eq!(issues[0].description, "");
+        assert!(!issues[0].is_blocked);
     }
 
     #[test]

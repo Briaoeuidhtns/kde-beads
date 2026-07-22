@@ -66,9 +66,14 @@ Item {
         function test_create_editor_submits_fields() {
             createApp();
             const editor = openCreateEditor();
+            const statusField = findChild(editor, "statusField");
             findChild(editor, "titleField").text = "Test-created issue";
             findChild(editor, "descriptionField").text = "Created in Qt Quick Test";
             findChild(editor, "labelsField").text = "qml, kde";
+
+            compare(statusField.count, 4);
+            for (let index = 0; index < statusField.count; ++index)
+                verify(statusField.valueAt(index) !== "blocked");
 
             editor.save();
 
@@ -79,6 +84,33 @@ Item {
             compare(Backend.lastCreatedRequest.status, "open");
             compare(Backend.lastCreatedRequest.priority, "2");
             compare(Backend.lastCreatedRequest.parentId, "");
+        }
+
+        function test_legacy_blocked_status_is_preserved_on_save() {
+            Backend.issues = [issue("test-legacy-blocked", "blocked")];
+            Backend.detail = {
+                "id": "test-legacy-blocked",
+                "title": "Legacy blocked issue",
+                "status": "blocked",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-legacy-blocked");
+            const editor = findChild(app, "editorPage");
+            const statusField = findChild(editor, "statusField");
+
+            compare(statusField.currentValue, "blocked");
+            compare(statusField.count, 5);
+            editor.save();
+
+            compare(Backend.saveIssueCallCount, 1);
+            compare(Backend.lastSavedRequest.status, "blocked");
         }
 
         function test_created_issue_stays_open_as_persisted_editor() {

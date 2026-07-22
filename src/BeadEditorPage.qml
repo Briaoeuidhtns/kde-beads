@@ -78,9 +78,25 @@ Kirigami.ScrollablePage {
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: event => editor.handlePasteEvent(event)
 
+    function statusOptions() {
+        const options = [
+            { "text": qsTr("Open"), "value": "open" },
+            { "text": qsTr("In progress"), "value": "in_progress" },
+            { "text": qsTr("Deferred"), "value": "deferred" },
+            { "text": qsTr("Closed"), "value": "closed" }
+        ];
+        if (!creating && String(localDetail.status || "") === "blocked") {
+            options.splice(2, 0, {
+                "text": qsTr("Blocked (legacy status)"),
+                "value": "blocked"
+            });
+        }
+        return options;
+    }
+
     function statusIndex(status) {
-        const statuses = ["open", "in_progress", "blocked", "deferred", "closed"];
-        return Math.max(0, statuses.indexOf(status));
+        const index = statusOptions().findIndex(option => option.value === status);
+        return Math.max(0, index);
     }
 
     function populate() {
@@ -514,13 +530,7 @@ Kirigami.ScrollablePage {
                 implicitWidth: editor.formFieldWidth
                 textRole: "text"
                 valueRole: "value"
-                model: [
-                    { "text": qsTr("Open"), "value": "open" },
-                    { "text": qsTr("In progress"), "value": "in_progress" },
-                    { "text": qsTr("Blocked"), "value": "blocked" },
-                    { "text": qsTr("Deferred"), "value": "deferred" },
-                    { "text": qsTr("Closed"), "value": "closed" }
-                ]
+                model: editor.statusOptions()
             }
 
             Controls.ComboBox {

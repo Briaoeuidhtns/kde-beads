@@ -19,6 +19,7 @@ Rectangle {
     required property bool backendLoading
     required property Item dragProxy
     property bool expanded: totalCount > 0
+    property bool dropEnabled: true
 
     signal moveIssueRequested(string issueId, string status)
     signal openIssueRequested(string issueId)
@@ -44,7 +45,9 @@ Rectangle {
 
     DropArea {
         id: sectionDropArea
+        objectName: `sectionDropArea-${section.statusName}`
         anchors.fill: parent
+        enabled: section.dropEnabled
         z: 10
         keys: ["bead-card"]
 
@@ -98,6 +101,7 @@ Rectangle {
             totalCount: section.totalCount
             backendLoading: section.backendLoading
             dragProxy: section.dragProxy
+            dropEnabled: section.dropEnabled
             showHeader: false
             onMoveIssueRequested: (issueId, status) => section.moveIssueRequested(issueId, status)
             onOpenIssueRequested: issueId => section.openIssueRequested(issueId)

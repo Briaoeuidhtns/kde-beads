@@ -33,7 +33,8 @@ Item {
                 "issue_type": "task",
                 "assignee": "",
                 "labels": [],
-                "closed_at": ""
+                "closed_at": "",
+                "is_blocked": false
             };
         }
 
@@ -88,10 +89,40 @@ Item {
         }
 
         function test_populated_secondary_status_starts_expanded() {
-            createApp([issue("test-blocked", "blocked")]);
+            const blocked = issue("test-blocked", "open");
+            blocked.is_blocked = true;
+            createApp([blocked]);
 
             compare(findChild(app, "statusSection-blocked").expanded, true);
             compare(findChild(app, "statusSection-deferred").expanded, false);
+            compare(findChild(app, "cardList-open").count, 0);
+            compare(findChild(app, "cardList-blocked").count, 1);
+            compare(findChild(app, "cardList-blocked").model[0].id, "test-blocked");
+        }
+
+        function test_blocked_category_is_not_a_drop_target() {
+            createApp([]);
+
+            compare(findChild(app, "statusSection-blocked").dropEnabled, false);
+            compare(findChild(app, "statusColumn-blocked").dropEnabled, false);
+            compare(findChild(app, "sectionDropArea-blocked").enabled, false);
+            compare(findChild(app, "columnDropArea-blocked").enabled, false);
+        }
+
+        function test_deferred_and_closed_override_dependency_blocking() {
+            const deferred = issue("test-blocked-deferred", "deferred");
+            deferred.is_blocked = true;
+            const inProgress = issue("test-blocked-progress", "in_progress");
+            inProgress.is_blocked = true;
+            const closed = issue("test-blocked-closed", "closed");
+            closed.is_blocked = true;
+            closed.closed_at = new Date().toISOString();
+            createApp([deferred, inProgress, closed]);
+
+            compare(findChild(app, "cardList-blocked").count, 1);
+            compare(findChild(app, "cardList-deferred").count, 1);
+            compare(findChild(app, "cardList-in_progress").count, 0);
+            compare(findChild(app, "cardList-closed").count, 1);
         }
 
         function test_secondary_status_can_be_expanded() {

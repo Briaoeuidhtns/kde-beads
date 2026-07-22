@@ -185,6 +185,40 @@ fn updates_issue_fields_and_status() {
 }
 
 #[test]
+fn lists_dependency_blocking_separately_from_stored_status() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let blocker = client
+        .create(&new_issue("Blocking issue", Status::Open))
+        .expect("create blocker");
+    let dependent = client
+        .create(&new_issue("Dependent issue", Status::Open))
+        .expect("create dependent");
+    client
+        .add_dependency(&dependent.id, &blocker.id, "blocks")
+        .expect("add blocking dependency");
+
+    let listed = client.list().expect("list blocked dependent");
+    let listed_dependent = listed
+        .iter()
+        .find(|issue| issue.id == dependent.id)
+        .expect("find dependent");
+    assert_eq!(listed_dependent.status, Status::Open);
+    assert!(listed_dependent.is_blocked);
+
+    client
+        .set_status(&blocker.id, Status::Closed)
+        .expect("close blocker");
+    let listed = client.list().expect("list unblocked dependent");
+    let listed_dependent = listed
+        .iter()
+        .find(|issue| issue.id == dependent.id)
+        .expect("find dependent");
+    assert_eq!(listed_dependent.status, Status::Open);
+    assert!(!listed_dependent.is_blocked);
+}
+
+#[test]
 fn adds_opens_and_removes_an_attachment() {
     let workspace = workspace();
     let client = Client::new(workspace.path()).expect("create client");

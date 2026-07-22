@@ -24,6 +24,7 @@ Rectangle {
     property bool compactHeader: false
     property bool showHeader: true
     property bool showCreateWhenEmpty: false
+    property bool dropEnabled: true
 
     signal moveIssueRequested(string issueId, string status)
     signal openIssueRequested(string issueId)
@@ -47,7 +48,9 @@ Rectangle {
 
     DropArea {
         id: dropArea
+        objectName: `columnDropArea-${column.statusName}`
         anchors.fill: parent
+        enabled: column.dropEnabled
         keys: ["bead-card"]
 
         onDropped: drop => {

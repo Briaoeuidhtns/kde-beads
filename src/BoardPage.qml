@@ -29,10 +29,19 @@ Kirigami.Page {
     title: qsTr("Beads")
     padding: 0
 
+    function boardStatus(issue) {
+        const status = String(issue.status || "open");
+        if (status === "closed" || status === "deferred")
+            return status;
+        if (issue.is_blocked || status === "blocked")
+            return "blocked";
+        return status;
+    }
+
     function issuesForStatus(status) {
         const query = searchField.text.trim().toLowerCase();
         return (issues || []).filter(issue => {
-            if (issue.status !== status)
+            if (boardStatus(issue) !== status)
                 return false;
             if (query.length === 0)
                 return true;
@@ -43,7 +52,7 @@ Kirigami.Page {
     }
 
     function statusCount(status) {
-        return (issues || []).filter(issue => issue.status === status).length;
+        return (issues || []).filter(issue => boardStatus(issue) === status).length;
     }
 
     function closedTimestamp(issue) {

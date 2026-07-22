@@ -59,6 +59,7 @@ Rectangle {
             totalCount: openColumn.blockedCount
             backendLoading: openColumn.backendLoading
             dragProxy: openColumn.dragProxy
+            dropEnabled: false
             onMoveIssueRequested: (issueId, status) => openColumn.moveIssueRequested(issueId, status)
             onOpenIssueRequested: issueId => openColumn.openIssueRequested(issueId)
             onCreateIssueRequested: openColumn.createIssueRequested()
