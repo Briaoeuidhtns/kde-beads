@@ -17,6 +17,7 @@ Rectangle {
     required property int deferredCount
     required property bool backendLoading
     required property Item dragProxy
+    required property real headerHeight
 
     signal moveIssueRequested(string issueId, string status)
     signal openIssueRequested(string issueId)
@@ -40,6 +41,7 @@ Rectangle {
             totalCount: openColumn.openCount
             backendLoading: openColumn.backendLoading
             dragProxy: openColumn.dragProxy
+            headerHeight: openColumn.headerHeight
             showCreateWhenEmpty: true
             onMoveIssueRequested: (issueId, status) => openColumn.moveIssueRequested(issueId, status)
             onOpenIssueRequested: issueId => openColumn.openIssueRequested(issueId)

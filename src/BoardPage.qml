@@ -16,6 +16,8 @@ Kirigami.Page {
     required property bool backendLoading
     required property string backendErrorMessage
     required property string workspace
+    property int closedRangeDays: 0
+    property real columnHeaderHeight: 0
 
     signal createIssueRequested()
     signal openIssueRequested(string issueId)
@@ -42,6 +44,23 @@ Kirigami.Page {
 
     function statusCount(status) {
         return (issues || []).filter(issue => issue.status === status).length;
+    }
+
+    function closedTimestamp(issue) {
+        const timestamp = Date.parse(String(issue.closed_at || ""));
+        return isNaN(timestamp) ? -Infinity : timestamp;
+    }
+
+    function closedIssues() {
+        const closed = issuesForStatus("closed").slice();
+        closed.sort((left, right) => closedTimestamp(right) - closedTimestamp(left));
+        if (closedRangeDays === 0)
+            return closed;
+
+        const now = new Date();
+        const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        cutoff.setDate(cutoff.getDate() - (closedRangeDays - 1));
+        return closed.filter(issue => closedTimestamp(issue) >= cutoff.getTime());
     }
 
     actions: [
@@ -177,6 +196,7 @@ Kirigami.Page {
                     deferredCount: boardPage.statusCount("deferred")
                     backendLoading: boardPage.backendLoading
                     dragProxy: cardDragProxy
+                    headerHeight: boardPage.columnHeaderHeight
                     onMoveIssueRequested: (issueId, status) => boardPage.moveIssueRequested(issueId, status)
                     onOpenIssueRequested: issueId => boardPage.openIssueRequested(issueId)
                     onCreateIssueRequested: boardPage.createIssueRequested()
@@ -192,6 +212,7 @@ Kirigami.Page {
                     totalCount: boardPage.statusCount("in_progress")
                     backendLoading: boardPage.backendLoading
                     dragProxy: cardDragProxy
+                    headerHeight: boardPage.columnHeaderHeight
                     onMoveIssueRequested: (issueId, status) => boardPage.moveIssueRequested(issueId, status)
                     onOpenIssueRequested: issueId => boardPage.openIssueRequested(issueId)
                     onCreateIssueRequested: boardPage.createIssueRequested()
@@ -203,10 +224,36 @@ Kirigami.Page {
                     statusName: "closed"
                     heading: qsTr("Closed")
                     accent: Kirigami.Theme.disabledTextColor
-                    cards: boardPage.issuesForStatus("closed")
-                    totalCount: boardPage.statusCount("closed")
+                    cards: boardPage.closedIssues()
+                    totalCount: boardPage.closedIssues().length
                     backendLoading: boardPage.backendLoading
                     dragProxy: cardDragProxy
+                    headerHeight: boardPage.columnHeaderHeight
+                    headerControl: Component {
+                        Controls.ComboBox {
+                            objectName: "closedRangeField"
+                            textRole: "text"
+                            valueRole: "days"
+                            model: [
+                                { "text": qsTr("All"), "days": 0 },
+                                { "text": qsTr("Today"), "days": 1 },
+                                { "text": qsTr("Last 3 days"), "days": 3 },
+                                { "text": qsTr("Last 7 days"), "days": 7 }
+                            ]
+                            Accessible.name: qsTr("Closed date range")
+                            function updateColumnHeaderHeight() {
+                                boardPage.columnHeaderHeight = Math.max(
+                                    boardPage.columnHeaderHeight,
+                                    implicitHeight
+                                );
+                            }
+                            Component.onCompleted: updateColumnHeaderHeight()
+                            onImplicitHeightChanged: updateColumnHeaderHeight()
+                            onCurrentValueChanged: {
+                                boardPage.closedRangeDays = Number(currentValue || 0);
+                            }
+                        }
+                    }
                     onMoveIssueRequested: (issueId, status) => boardPage.moveIssueRequested(issueId, status)
                     onOpenIssueRequested: issueId => boardPage.openIssueRequested(issueId)
                     onCreateIssueRequested: boardPage.createIssueRequested()

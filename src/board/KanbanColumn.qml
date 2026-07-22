@@ -19,6 +19,8 @@ Rectangle {
     required property int totalCount
     required property bool backendLoading
     required property Item dragProxy
+    property Component headerControl: null
+    property real headerHeight: 0
     property bool compactHeader: false
     property bool showHeader: true
     property bool showCreateWhenEmpty: false
@@ -61,9 +63,11 @@ Rectangle {
         spacing: Kirigami.Units.largeSpacing
 
         RowLayout {
+            objectName: `columnHeader-${column.statusName}`
             visible: column.showHeader
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.smallSpacing
+            Layout.minimumHeight: column.headerHeight
 
             Rectangle {
                 implicitWidth: Kirigami.Units.smallSpacing
@@ -75,6 +79,11 @@ Rectangle {
                 text: column.heading
                 level: column.compactHeader ? 4 : 3
                 Layout.fillWidth: true
+            }
+            Loader {
+                visible: active
+                active: column.headerControl !== null
+                sourceComponent: column.headerControl
             }
             Controls.Label {
                 text: column.cards.length

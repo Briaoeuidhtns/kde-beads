@@ -32,7 +32,8 @@ Item {
                 "priority": 2,
                 "issue_type": "task",
                 "assignee": "",
-                "labels": []
+                "labels": [],
+                "closed_at": ""
             };
         }
 
@@ -160,6 +161,56 @@ Item {
             const card = list.itemAtIndex(10);
 
             verify(card.width + scrollBar.width < list.width);
+        }
+
+        function test_closed_issues_are_sorted_and_filterable_by_close_date() {
+            const now = new Date();
+            const recent = issue("closed-recent", "closed");
+            recent.closed_at = now.toISOString();
+            const threeDay = issue("closed-three-day", "closed");
+            threeDay.closed_at = new Date(
+                now.getTime() - 2 * 24 * 60 * 60 * 1000
+            ).toISOString();
+            const old = issue("closed-old", "closed");
+            old.closed_at = new Date(
+                now.getTime() - 8 * 24 * 60 * 60 * 1000
+            ).toISOString();
+            createApp([old, recent, threeDay]);
+            const list = findChild(app, "cardList-closed");
+            const rangeField = findChild(app, "closedRangeField");
+            verify(list);
+            verify(rangeField);
+            tryCompare(list, "count", 3);
+            compare(list.model[0].id, "closed-recent");
+            compare(list.model[1].id, "closed-three-day");
+            compare(list.model[2].id, "closed-old");
+
+            rangeField.currentIndex = 1;
+            tryCompare(list, "count", 1);
+            compare(list.model[0].id, "closed-recent");
+
+            rangeField.currentIndex = 2;
+            tryCompare(list, "count", 2);
+            compare(list.model[1].id, "closed-three-day");
+
+            rangeField.currentIndex = 3;
+            tryCompare(list, "count", 2);
+
+            rangeField.currentIndex = 0;
+            tryCompare(list, "count", 3);
+        }
+
+        function test_top_level_column_headers_share_the_tallest_height() {
+            createApp([]);
+            const openHeader = findChild(app, "columnHeader-open");
+            const progressHeader = findChild(app, "columnHeader-in_progress");
+            const closedHeader = findChild(app, "columnHeader-closed");
+            verify(openHeader);
+            verify(progressHeader);
+            verify(closedHeader);
+            tryVerify(() => closedHeader.height > 0);
+            tryCompare(openHeader, "height", closedHeader.height);
+            tryCompare(progressHeader, "height", closedHeader.height);
         }
 
         function test_card_issue_id_can_be_copied_without_opening_editor() {
