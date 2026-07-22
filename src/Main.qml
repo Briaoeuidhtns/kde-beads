@@ -86,6 +86,35 @@ Kirigami.ApplicationWindow {
         });
     }
 
+    Item {
+        id: cardDragProxy
+        parent: Controls.Overlay.overlay
+
+        property var sourceCard: null
+        readonly property string issueId: sourceCard ? sourceCard.issueId : ""
+        readonly property string issueStatus: sourceCard ? sourceCard.issueStatus : ""
+
+        width: sourceCard ? sourceCard.width : 0
+        height: sourceCard ? sourceCard.height : 0
+        visible: Drag.active
+        z: 1000
+
+        Drag.active: Boolean(sourceCard && sourceCard.dragActive)
+        Drag.source: cardDragProxy
+        Drag.keys: ["bead-card"]
+        Drag.supportedActions: Qt.MoveAction
+        Drag.proposedAction: Qt.MoveAction
+        Drag.hotSpot.x: width / 2
+        Drag.hotSpot.y: Kirigami.Units.gridUnit
+
+        ShaderEffectSource {
+            anchors.fill: parent
+            sourceItem: cardDragProxy.sourceCard
+            hideSource: cardDragProxy.Drag.active
+            live: true
+        }
+    }
+
     component KanbanColumn: Rectangle {
         id: column
         objectName: `statusColumn-${statusName}`
@@ -155,9 +184,12 @@ Kirigami.ApplicationWindow {
                 Layout.fillHeight: true
                 model: column.cards
                 spacing: Math.round(Kirigami.Units.smallSpacing / 2)
-                clip: false
+                clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                Controls.ScrollBar.vertical: Controls.ScrollBar {}
+                Controls.ScrollBar.vertical: Controls.ScrollBar {
+                    id: cardListScrollBar
+                    objectName: `cardScrollBar-${column.statusName}`
+                }
 
                 delegate: Controls.ItemDelegate {
                     id: card
@@ -166,10 +198,14 @@ Kirigami.ApplicationWindow {
 
                     readonly property string issueId: String(modelData.id)
                     readonly property string issueStatus: String(modelData.status)
-                    property real restingX: 0
-                    property real restingY: 0
+                    readonly property bool dragActive: dragArea.drag.active
 
-                    width: ListView.view.width
+                    width: Math.max(
+                        0,
+                        ListView.view.width
+                            - cardListScrollBar.width
+                            - Kirigami.Units.smallSpacing
+                    )
                     implicitHeight: cardContent.implicitHeight + topPadding + bottomPadding
                     leftPadding: Kirigami.Units.largeSpacing
                     rightPadding: Kirigami.Units.largeSpacing
@@ -177,15 +213,7 @@ Kirigami.ApplicationWindow {
                     bottomPadding: Kirigami.Units.largeSpacing
                     hoverEnabled: true
                     highlighted: dragArea.drag.active
-                    z: dragArea.drag.active ? 100 : 1
-
-                    Drag.active: dragArea.drag.active
-                    Drag.source: card
-                    Drag.keys: ["bead-card"]
-                    Drag.supportedActions: Qt.MoveAction
-                    Drag.proposedAction: Qt.MoveAction
-                    Drag.hotSpot.x: width / 2
-                    Drag.hotSpot.y: Kirigami.Units.gridUnit
+                    z: 1
 
                     contentItem: ColumnLayout {
                         id: cardContent
@@ -267,26 +295,22 @@ Kirigami.ApplicationWindow {
                         enabled: !Backend.loading
                         hoverEnabled: true
                         cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                        drag.target: card
+                        drag.target: cardDragProxy
                         drag.threshold: Kirigami.Units.gridUnit / 2
 
                         onPressed: mouse => {
-                            card.restingX = card.x;
-                            card.restingY = card.y;
+                            const position = card.mapToItem(Controls.Overlay.overlay, 0, 0);
+                            cardDragProxy.sourceCard = card;
+                            cardDragProxy.x = position.x;
+                            cardDragProxy.y = position.y;
                             mouse.accepted = true;
                         }
                         onClicked: root.openEditor(card.issueId)
                         onReleased: {
-                            card.Drag.drop();
-                            card.x = card.restingX;
-                            card.y = card.restingY;
-                            Qt.callLater(() => cardList.forceLayout());
+                            cardDragProxy.Drag.drop();
+                            cardDragProxy.sourceCard = null;
                         }
-                        onCanceled: {
-                            card.x = card.restingX;
-                            card.y = card.restingY;
-                            Qt.callLater(() => cardList.forceLayout());
-                        }
+                        onCanceled: cardDragProxy.sourceCard = null
                     }
                 }
 

@@ -128,6 +128,26 @@ Item {
             tryCompare(Backend, "moveIssueCallCount", 1);
             compare(Backend.lastMovedId, "test-drag");
             compare(Backend.lastMovedStatus, "in_progress");
+            compare(sourceList.clip, true);
+        }
+
+        function test_scrolled_cards_stay_inside_list_and_scrollbar_gutter() {
+            const issues = [];
+            for (let index = 0; index < 20; ++index)
+                issues.push(issue(`test-scroll-${index}`, "open"));
+            createApp(issues);
+
+            const list = findChild(app, "cardList-open");
+            const scrollBar = findChild(app, "cardScrollBar-open");
+            verify(list);
+            verify(scrollBar);
+            compare(list.clip, true);
+            tryCompare(list, "count", issues.length);
+            list.positionViewAtIndex(10, ListView.Beginning);
+            tryVerify(() => list.itemAtIndex(10) !== null);
+            const card = list.itemAtIndex(10);
+
+            verify(card.width + scrollBar.width < list.width);
         }
     }
 }
