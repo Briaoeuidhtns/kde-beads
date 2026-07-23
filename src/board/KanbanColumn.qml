@@ -122,6 +122,7 @@ Rectangle {
                 readonly property string issueId: String(modelData.id)
                 readonly property string issueStatus: String(modelData.status)
                 readonly property bool dragActive: dragArea.drag.active
+                property alias gateIcon: gateBlockedIcon
 
                 width: Math.max(
                     0,
@@ -163,6 +164,22 @@ Rectangle {
                             Layout.preferredHeight: Layout.preferredWidth
                             z: 2
                             onCopyRequested: issueId => column.copyIssueIdRequested(issueId)
+                        }
+                        Kirigami.Icon {
+                            id: gateBlockedIcon
+                            objectName: `gateBlockedIcon-${card.issueId}`
+                            visible: Boolean(card.modelData.blocked_by_gate)
+                            source: "object-locked"
+                            color: dragArea.drag.active
+                                ? Kirigami.Theme.highlightedTextColor
+                                : Kirigami.Theme.neutralTextColor
+                            implicitWidth: Kirigami.Units.iconSizes.small
+                            implicitHeight: implicitWidth
+                            Accessible.name: qsTr("Blocked by gate")
+
+                            Controls.ToolTip.text: qsTr("Blocked by gate")
+                            Controls.ToolTip.visible: gateIconHover.hovered
+                            HoverHandler { id: gateIconHover }
                         }
                         Controls.Label {
                             text: `P${card.modelData.priority ?? 2}`

@@ -418,6 +418,86 @@ Item {
             compare(Backend.lastDependencyDetailId, "test-existing");
         }
 
+        function test_existing_issue_manages_human_and_time_gates() {
+            Backend.issues = [issue("test-existing", "open")];
+            Backend.detail = {
+                "id": "test-existing",
+                "title": "Gated issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [{
+                    "id": "gate-human",
+                    "title": "Gate: human",
+                    "description": "Ad-hoc gate blocking test-existing\n\nReason: Approve the design",
+                    "status": "open",
+                    "issue_type": "gate",
+                    "dependency_type": "blocks",
+                    "await_type": "human",
+                    "created_at": "2026-07-23T04:00:00Z"
+                }, {
+                    "id": "gate-timer",
+                    "title": "Gate: timer",
+                    "description": "Ad-hoc gate blocking test-existing\n\nReason: Wait for rollout",
+                    "status": "open",
+                    "issue_type": "gate",
+                    "dependency_type": "blocks",
+                    "await_type": "timer",
+                    "timeout": 7200000000000,
+                    "created_at": "2026-07-23T04:00:00Z"
+                }],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-existing");
+            const editor = findChild(app, "editorPage");
+            editor.detailReady = true;
+            const typeField = findChild(editor, "gateTypeField");
+            const reasonField = findChild(editor, "gateReasonField");
+            const timeoutField = findChild(editor, "gateTimeoutField");
+            const addButton = findChild(editor, "addGateButton");
+            const resolveButton = findChild(editor, "resolveGate-gate-human");
+            const removeButton = findChild(editor, "removeGate-gate-timer");
+
+            compare(editor.gates.length, 2);
+            compare(editor.linkedDependencies.length, 0);
+            compare(editor.gateReason(editor.gates[0]), "Approve the design");
+            verify(editor.gateDeadline(editor.gates[1]).length > 0);
+            compare(typeField.count, 2);
+            verify(resolveButton);
+            verify(removeButton);
+
+            reasonField.text = "Need product approval";
+            addButton.clicked();
+            compare(Backend.createGateCallCount, 1);
+            compare(Backend.lastGateIssueId, "test-existing");
+            compare(Backend.lastGateType, "human");
+            compare(Backend.lastGateReason, "Need product approval");
+            compare(Backend.lastGateTimeout, "");
+
+            typeField.currentIndex = 1;
+            timeoutField.currentIndex = 3;
+            reasonField.text = "Wait for propagation";
+            addButton.clicked();
+            compare(Backend.createGateCallCount, 2);
+            compare(Backend.lastGateType, "timer");
+            compare(Backend.lastGateReason, "Wait for propagation");
+            compare(Backend.lastGateTimeout, "2h");
+
+            resolveButton.clicked();
+            compare(Backend.resolveGateCallCount, 1);
+            compare(Backend.lastGateIssueId, "test-existing");
+            compare(Backend.lastGateId, "gate-human");
+
+            removeButton.clicked();
+            compare(Backend.removeGateCallCount, 1);
+            compare(Backend.lastGateIssueId, "test-existing");
+            compare(Backend.lastGateId, "gate-timer");
+        }
+
         function test_existing_issue_displays_and_submits_comments() {
             Backend.detail = {
                 "id": "test-existing",

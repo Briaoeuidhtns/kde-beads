@@ -34,7 +34,8 @@ Item {
                 "assignee": "",
                 "labels": [],
                 "closed_at": "",
-                "is_blocked": false
+                "is_blocked": false,
+                "blocked_by_gate": false
             };
         }
 
@@ -101,6 +102,32 @@ Item {
             compare(findChild(app, "cardList-open").count, 0);
             compare(findChild(app, "cardList-blocked").count, 1);
             compare(findChild(app, "cardList-blocked").model[0].id, "test-blocked");
+        }
+
+        function test_gate_blocked_card_has_marker() {
+            const gated = issue("test-gated", "open");
+            gated.is_blocked = true;
+            gated.blocked_by_gate = true;
+            const dependencyBlocked = issue("test-dependency", "open");
+            dependencyBlocked.is_blocked = true;
+            createApp([gated, dependencyBlocked]);
+            const section = findChild(app, "statusSection-blocked");
+            const cardList = findChild(app, "cardList-blocked");
+            tryCompare(section, "expanded", true);
+            tryCompare(cardList, "count", 2);
+            cardList.positionViewAtBeginning();
+            tryVerify(() => cardList.itemAtIndex(0) !== null);
+            cardList.positionViewAtEnd();
+            tryVerify(() => cardList.itemAtIndex(1) !== null);
+            wait(50);
+
+            const gatedCard = cardList.itemAtIndex(0);
+            const dependencyCard = cardList.itemAtIndex(1);
+            compare(gatedCard.issueId, "test-gated");
+            verify(gatedCard.gateIcon.visible);
+            compare(gatedCard.gateIcon.source, "object-locked");
+            compare(dependencyCard.issueId, "test-dependency");
+            verify(!dependencyCard.gateIcon.visible);
         }
 
         function test_blocked_category_is_not_a_drop_target() {

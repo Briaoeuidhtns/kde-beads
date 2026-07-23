@@ -909,6 +909,7 @@ mod tests {
             native_attachments_supported: false,
             polyfill_attachment_count: 0,
             is_blocked: false,
+            blocked_by_gate: false,
         }
     }
 }

@@ -417,6 +417,75 @@ fn creates_child_and_blocking_relationships() {
 }
 
 #[test]
+fn creates_resolves_and_expires_supported_gates() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let issue = client
+        .create(&new_issue("Gated issue", Status::Open))
+        .expect("create issue");
+
+    let human = client
+        .create_gate(&issue.id, "human", "Approve the design", "")
+        .expect("create human gate");
+    let timer = client
+        .create_gate(&issue.id, "timer", "Wait briefly", "100ms")
+        .expect("create timer gate");
+    let dependencies = client.dependencies(&issue.id).expect("list gates");
+
+    assert_eq!(human.await_type, "human");
+    assert_eq!(timer.await_type, "timer");
+    assert_eq!(timer.timeout, 100_000_000);
+    assert!(dependencies.iter().any(|gate| {
+        gate.id == human.id
+            && gate.await_type == "human"
+            && gate.description.contains("Approve the design")
+    }));
+    assert!(dependencies.iter().any(|gate| {
+        gate.id == timer.id && gate.await_type == "timer" && gate.timeout == 100_000_000
+    }));
+    assert!(
+        client
+            .list()
+            .expect("list without gate cards")
+            .iter()
+            .all(|listed| listed.issue_type != "gate")
+    );
+    assert!(
+        client
+            .list()
+            .expect("list gate-blocked issue")
+            .iter()
+            .find(|listed| listed.id == issue.id)
+            .expect("find gate-blocked issue")
+            .blocked_by_gate
+    );
+
+    client
+        .resolve_gate(&human.id, "Approved by test")
+        .expect("resolve human gate");
+    assert_eq!(
+        client.show(&human.id).expect("show resolved gate").status,
+        Status::Closed
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    client.list().expect("evaluate timer gate");
+    assert_eq!(
+        client.show(&timer.id).expect("show expired gate").status,
+        Status::Closed
+    );
+    assert!(
+        !client
+            .list()
+            .expect("list after gates resolve")
+            .iter()
+            .find(|listed| listed.id == issue.id)
+            .expect("find unblocked issue")
+            .blocked_by_gate
+    );
+}
+
+#[test]
 fn adds_and_lists_comments() {
     let workspace = workspace();
     let client = Client::new(workspace.path()).expect("create client");

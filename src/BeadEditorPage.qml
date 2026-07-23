@@ -41,6 +41,12 @@ Kirigami.ScrollablePage {
     readonly property bool persisted: !creating && issueId.length > 0
     readonly property var relationshipDetail: localDetail
     readonly property var dependencies: relationshipDetail.dependencies || []
+    readonly property var gates: dependencies.filter(issue =>
+        issue.issue_type === "gate"
+            && (issue.await_type === "human" || issue.await_type === "timer")
+            && issue.status !== "closed")
+    readonly property var linkedDependencies: dependencies.filter(issue =>
+        issue.issue_type !== "gate")
     readonly property var dependents: relationshipDetail.dependents || []
     readonly property var comments: localDetail.comments || []
     readonly property var hostStack: KirigamiLayouts.PageStack.pageStack
@@ -317,6 +323,57 @@ Kirigami.ScrollablePage {
             incoming ? issueId : relatedId,
             issueId
         );
+        return true;
+    }
+
+    function gateReason(gate) {
+        const description = String(gate.description || "");
+        const marker = "\n\nReason: ";
+        const markerIndex = description.indexOf(marker);
+        return markerIndex >= 0
+            ? description.substring(markerIndex + marker.length)
+            : description;
+    }
+
+    function gateDeadline(gate) {
+        const createdAt = Date.parse(String(gate.created_at || ""));
+        const timeoutMilliseconds = Number(gate.timeout || 0) / 1000000;
+        if (isNaN(createdAt) || timeoutMilliseconds <= 0)
+            return "";
+        return new Date(createdAt + timeoutMilliseconds)
+            .toLocaleString(Qt.locale(), Locale.ShortFormat);
+    }
+
+    function createGate() {
+        const reason = gateReasonField.text.trim();
+        if (reason.length === 0 || backend.loading)
+            return false;
+        preserveFieldsWhileLoading = true;
+        backend.createGate(
+            issueId,
+            gateTypeField.currentValue,
+            reason,
+            gateTypeField.currentValue === "timer"
+                ? gateTimeoutField.currentValue
+                : ""
+        );
+        gateReasonField.clear();
+        return true;
+    }
+
+    function resolveGate(gateId) {
+        if (!gateId || backend.loading)
+            return false;
+        preserveFieldsWhileLoading = true;
+        backend.resolveGate(issueId, String(gateId));
+        return true;
+    }
+
+    function removeGate(gateId) {
+        if (!gateId || backend.loading)
+            return false;
+        preserveFieldsWhileLoading = true;
+        backend.removeGate(issueId, String(gateId));
         return true;
     }
 
@@ -910,14 +967,14 @@ Kirigami.ScrollablePage {
 
                 Controls.Label {
                     visible: (editor.detailReady || editor.hydratingCreatedIssue)
-                        && editor.dependencies.length === 0
+                        && editor.linkedDependencies.length === 0
                         && editor.dependents.length === 0
                     text: qsTr("No linked beads")
                     color: Kirigami.Theme.disabledTextColor
                 }
 
                 Repeater {
-                    model: editor.dependencies
+                    model: editor.linkedDependencies
 
                     delegate: RowLayout {
                         required property var modelData
@@ -1115,6 +1172,130 @@ Kirigami.ScrollablePage {
                                 relationshipTargetField.forceActiveFocus();
                             }
                         }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                id: gatesSection
+                objectName: "gatesSection"
+                Kirigami.FormData.label: qsTr("Gates:")
+                Kirigami.FormData.labelAlignment: Qt.AlignTop
+                visible: editor.persisted
+                implicitWidth: editor.formFieldWidth
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Controls.Label {
+                    visible: editor.detailReady && editor.gates.length === 0
+                    text: qsTr("No open gates")
+                    color: Kirigami.Theme.disabledTextColor
+                }
+
+                Repeater {
+                    model: editor.gates
+
+                    delegate: Controls.Frame {
+                        id: gateCard
+                        objectName: `gate-${modelData.id}`
+                        required property var modelData
+                        Layout.fillWidth: true
+
+                        contentItem: RowLayout {
+                            spacing: Kirigami.Units.largeSpacing
+
+                            Kirigami.Icon {
+                                source: gateCard.modelData.await_type === "timer"
+                                    ? "chronometer"
+                                    : "user-identity"
+                                implicitWidth: Kirigami.Units.iconSizes.medium
+                                implicitHeight: implicitWidth
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 0
+
+                                Controls.Label {
+                                    text: gateCard.modelData.await_type === "timer"
+                                        ? qsTr("Time gate")
+                                        : qsTr("Human review")
+                                    font.weight: Font.DemiBold
+                                }
+                                Controls.Label {
+                                    text: editor.gateReason(gateCard.modelData)
+                                    wrapMode: Text.Wrap
+                                    Layout.fillWidth: true
+                                }
+                                Controls.Label {
+                                    visible: gateCard.modelData.await_type === "timer"
+                                        && text.length > 0
+                                    text: editor.gateDeadline(gateCard.modelData)
+                                    color: Kirigami.Theme.disabledTextColor
+                                }
+                            }
+                            Controls.Button {
+                                objectName: `resolveGate-${gateCard.modelData.id}`
+                                visible: gateCard.modelData.await_type === "human"
+                                text: qsTr("Approve")
+                                icon.name: "dialog-ok-apply"
+                                enabled: !editor.backend.loading
+                                onClicked: editor.resolveGate(gateCard.modelData.id)
+                            }
+                            Controls.ToolButton {
+                                objectName: `removeGate-${gateCard.modelData.id}`
+                                text: qsTr("Remove gate")
+                                icon.name: "edit-delete"
+                                display: Controls.AbstractButton.IconOnly
+                                enabled: !editor.backend.loading
+                                Controls.ToolTip.text: text
+                                Controls.ToolTip.visible: hovered
+                                onClicked: editor.removeGate(gateCard.modelData.id)
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    enabled: editor.detailReady && !editor.backend.loading
+
+                    Controls.ComboBox {
+                        id: gateTypeField
+                        objectName: "gateTypeField"
+                        textRole: "text"
+                        valueRole: "value"
+                        model: [
+                            { "text": qsTr("Human review"), "value": "human" },
+                            { "text": qsTr("Time gate"), "value": "timer" }
+                        ]
+                    }
+                    Controls.TextField {
+                        id: gateReasonField
+                        objectName: "gateReasonField"
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("Reason")
+                        onAccepted: editor.createGate()
+                    }
+                    Controls.ComboBox {
+                        id: gateTimeoutField
+                        objectName: "gateTimeoutField"
+                        visible: gateTypeField.currentValue === "timer"
+                        textRole: "text"
+                        valueRole: "value"
+                        model: [
+                            { "text": qsTr("15 minutes"), "value": "15m" },
+                            { "text": qsTr("30 minutes"), "value": "30m" },
+                            { "text": qsTr("1 hour"), "value": "1h" },
+                            { "text": qsTr("2 hours"), "value": "2h" },
+                            { "text": qsTr("1 day"), "value": "24h" }
+                        ]
+                    }
+                    Controls.Button {
+                        objectName: "addGateButton"
+                        text: qsTr("Add")
+                        icon.name: "list-add"
+                        enabled: gateReasonField.text.trim().length > 0
+                        onClicked: editor.createGate()
                     }
                 }
             }

@@ -146,6 +146,44 @@ pub(crate) fn remove_dependency_and_list(
     Ok(DetailMutationResult { detail, issues })
 }
 
+pub(crate) fn create_gate_and_list(
+    workspace: String,
+    issue_id: &str,
+    gate_type: &str,
+    reason: &str,
+    timeout: &str,
+) -> Result<DetailMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    client.create_gate(issue_id, gate_type, reason, timeout)?;
+    let detail = load_issue_detail_with_client(&client, issue_id)?;
+    let issues = client.list()?;
+    Ok(DetailMutationResult { detail, issues })
+}
+
+pub(crate) fn resolve_gate_and_list(
+    workspace: String,
+    issue_id: &str,
+    gate_id: &str,
+) -> Result<DetailMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    client.resolve_gate(gate_id, "Approved in Knecklace")?;
+    let detail = load_issue_detail_with_client(&client, issue_id)?;
+    let issues = client.list()?;
+    Ok(DetailMutationResult { detail, issues })
+}
+
+pub(crate) fn remove_gate_and_list(
+    workspace: String,
+    issue_id: &str,
+    gate_id: &str,
+) -> Result<DetailMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    client.delete(gate_id)?;
+    let detail = load_issue_detail_with_client(&client, issue_id)?;
+    let issues = client.list()?;
+    Ok(DetailMutationResult { detail, issues })
+}
+
 pub(crate) fn add_comment_and_list(
     workspace: String,
     issue_id: &str,

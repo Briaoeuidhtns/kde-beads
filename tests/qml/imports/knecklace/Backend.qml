@@ -22,6 +22,9 @@ QtObject {
     property int deleteIssueCallCount: 0
     property int addDependencyCallCount: 0
     property int removeDependencyCallCount: 0
+    property int createGateCallCount: 0
+    property int resolveGateCallCount: 0
+    property int removeGateCallCount: 0
     property int addCommentCallCount: 0
     property int addAttachmentCallCount: 0
     property int addAttachmentsCallCount: 0
@@ -41,6 +44,11 @@ QtObject {
     property string lastDependsOnId: ""
     property string lastDependencyType: ""
     property string lastDependencyDetailId: ""
+    property string lastGateIssueId: ""
+    property string lastGateId: ""
+    property string lastGateType: ""
+    property string lastGateReason: ""
+    property string lastGateTimeout: ""
     property string lastCommentIssueId: ""
     property string lastCommentText: ""
     property string lastAttachmentIssueId: ""
@@ -71,6 +79,9 @@ QtObject {
         deleteIssueCallCount = 0;
         addDependencyCallCount = 0;
         removeDependencyCallCount = 0;
+        createGateCallCount = 0;
+        resolveGateCallCount = 0;
+        removeGateCallCount = 0;
         addCommentCallCount = 0;
         addAttachmentCallCount = 0;
         addAttachmentsCallCount = 0;
@@ -90,6 +101,11 @@ QtObject {
         lastDependsOnId = "";
         lastDependencyType = "";
         lastDependencyDetailId = "";
+        lastGateIssueId = "";
+        lastGateId = "";
+        lastGateType = "";
+        lastGateReason = "";
+        lastGateTimeout = "";
         lastCommentIssueId = "";
         lastCommentText = "";
         lastAttachmentIssueId = "";
@@ -145,6 +161,26 @@ QtObject {
         lastDependencyIssueId = issueId;
         lastDependsOnId = dependsOnId;
         lastDependencyDetailId = detailIssueId;
+    }
+
+    function createGate(issueId, gateType, reason, timeout) {
+        createGateCallCount += 1;
+        lastGateIssueId = issueId;
+        lastGateType = gateType;
+        lastGateReason = reason;
+        lastGateTimeout = timeout;
+    }
+
+    function resolveGate(issueId, gateId) {
+        resolveGateCallCount += 1;
+        lastGateIssueId = issueId;
+        lastGateId = gateId;
+    }
+
+    function removeGate(issueId, gateId) {
+        removeGateCallCount += 1;
+        lastGateIssueId = issueId;
+        lastGateId = gateId;
     }
 
     function addComment(issueId, text) {

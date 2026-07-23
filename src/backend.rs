@@ -16,9 +16,10 @@ use crate::editor_request::{
 use crate::operations::{
     DeleteMutationResult, DetailMutationResult, MutationResult, add_attachment_to_issue,
     add_attachments_to_issue, add_comment_and_list, add_dependency_and_list, canonical_workspace,
-    create_issue_and_list, delete_issue_and_list, encode_result, list_issues, load_issue_detail,
-    materialize_attachment, migrate_attachments, move_issue_and_list, remove_attachment_from_issue,
-    remove_dependency_and_list, update_issue_and_list,
+    create_gate_and_list, create_issue_and_list, delete_issue_and_list, encode_result, list_issues,
+    load_issue_detail, materialize_attachment, migrate_attachments, move_issue_and_list,
+    remove_attachment_from_issue, remove_dependency_and_list, remove_gate_and_list,
+    resolve_gate_and_list, update_issue_and_list,
 };
 use crate::workspace_cache::WorkspaceCache;
 
@@ -598,6 +599,115 @@ impl Backend {
     }
 
     #[qslot]
+    fn create_gate(
+        &mut self,
+        issue_id: String,
+        gate_type: String,
+        reason: String,
+        timeout: String,
+    ) {
+        let issue_id = issue_id.trim().to_string();
+        let gate_type = gate_type.trim().to_string();
+        let reason = reason.trim().to_string();
+        let timeout = timeout.trim().to_string();
+        if issue_id.is_empty() || reason.is_empty() {
+            self.set_error("A bead ID and gate reason are required".to_string());
+            return;
+        }
+        if !matches!(gate_type.as_str(), "human" | "timer") {
+            self.set_error(format!("Unsupported gate type: {gate_type}"));
+            return;
+        }
+        if gate_type == "timer" && timeout.is_empty() {
+            self.set_error("A time gate duration is required".to_string());
+            return;
+        }
+        let Some((workspace, generation)) = self.begin_foreground(true) else {
+            return;
+        };
+
+        let result_workspace = workspace.clone();
+        let result_issue_id = issue_id.clone();
+        let generation = generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = create_gate_and_list(workspace, &issue_id, &gate_type, &reason, &timeout);
+            let (payload, error) = encode_result(result);
+            invoke_method!(
+                invoker,
+                "finishGateMutation",
+                payload,
+                error,
+                result_workspace,
+                generation,
+                result_issue_id
+            );
+        });
+    }
+
+    #[qslot]
+    fn resolve_gate(&mut self, issue_id: String, gate_id: String) {
+        let issue_id = issue_id.trim().to_string();
+        let gate_id = gate_id.trim().to_string();
+        if issue_id.is_empty() || gate_id.is_empty() {
+            self.set_error("A bead ID and gate ID are required".to_string());
+            return;
+        }
+        let Some((workspace, generation)) = self.begin_foreground(true) else {
+            return;
+        };
+
+        let result_workspace = workspace.clone();
+        let result_issue_id = issue_id.clone();
+        let generation = generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = resolve_gate_and_list(workspace, &issue_id, &gate_id);
+            let (payload, error) = encode_result(result);
+            invoke_method!(
+                invoker,
+                "finishGateMutation",
+                payload,
+                error,
+                result_workspace,
+                generation,
+                result_issue_id
+            );
+        });
+    }
+
+    #[qslot]
+    fn remove_gate(&mut self, issue_id: String, gate_id: String) {
+        let issue_id = issue_id.trim().to_string();
+        let gate_id = gate_id.trim().to_string();
+        if issue_id.is_empty() || gate_id.is_empty() {
+            self.set_error("A bead ID and gate ID are required".to_string());
+            return;
+        }
+        let Some((workspace, generation)) = self.begin_foreground(true) else {
+            return;
+        };
+
+        let result_workspace = workspace.clone();
+        let result_issue_id = issue_id.clone();
+        let generation = generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = remove_gate_and_list(workspace, &issue_id, &gate_id);
+            let (payload, error) = encode_result(result);
+            invoke_method!(
+                invoker,
+                "finishGateMutation",
+                payload,
+                error,
+                result_workspace,
+                generation,
+                result_issue_id
+            );
+        });
+    }
+
+    #[qslot]
     fn add_comment(&mut self, issue_id: String, text: String) {
         let issue_id = issue_id.trim().to_string();
         let text = text.trim().to_string();
@@ -1048,6 +1158,18 @@ impl Backend {
             issue_id,
             "relationships",
         );
+    }
+
+    #[qslot(qml_name = "finishGateMutation")]
+    fn finish_gate_mutation(
+        &mut self,
+        payload: String,
+        error: String,
+        workspace: String,
+        generation: String,
+        issue_id: String,
+    ) {
+        self.finish_detail_mutation(payload, error, workspace, generation, issue_id, "gates");
     }
 
     #[qslot(qml_name = "finishAddComment")]

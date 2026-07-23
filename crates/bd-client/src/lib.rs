@@ -62,10 +62,19 @@ pub struct Issue {
     pub polyfill_attachment_count: usize,
     #[serde(default)]
     pub is_blocked: bool,
+    #[serde(default)]
+    pub blocked_by_gate: bool,
 }
 
 #[derive(Deserialize)]
 struct BlockedIssue {
+    id: String,
+    #[serde(default)]
+    blocked_by: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct GateId {
     id: String,
 }
 
@@ -82,6 +91,30 @@ pub struct LinkedIssue {
     pub issue_type: String,
     #[serde(default)]
     pub dependency_type: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub await_type: String,
+    #[serde(default)]
+    pub timeout: u64,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Gate {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    pub status: Status,
+    #[serde(default)]
+    pub await_type: String,
+    #[serde(default)]
+    pub timeout: u64,
+    #[serde(default)]
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -228,11 +261,14 @@ impl Client {
     }
 
     pub fn list(&self) -> Result<Vec<Issue>, Error> {
-        let (payload, blocked_payload) = std::thread::scope(|scope| {
+        self.check_time_gates()?;
+        let (payload, blocked_payload, gate_payload) = std::thread::scope(|scope| {
             let blocked = scope.spawn(|| self.run(true, &["blocked", "--json"]));
+            let gates = scope.spawn(|| self.run(true, &["gate", "list", "--json"]));
             let listed = self.run(true, &["list", "--json", "--all", "--limit", "0"]);
             let blocked = blocked.join().unwrap_or(Err(Error::WorkerPanic("blocked")));
-            (listed, blocked)
+            let gates = gates.join().unwrap_or(Err(Error::WorkerPanic("gate list")));
+            (listed, blocked, gates)
         });
         let payload = payload?;
         let mut issues: Vec<Issue> =
@@ -240,15 +276,30 @@ impl Client {
                 operation: "list",
                 source,
             })?;
+        issues.retain(|issue| issue.issue_type != "gate");
         let payload = blocked_payload?;
         let blocked: Vec<BlockedIssue> =
             serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
                 operation: "blocked",
                 source,
             })?;
-        let blocked_ids: BTreeSet<_> = blocked.into_iter().map(|issue| issue.id).collect();
+        let gate_payload = gate_payload?;
+        let gates: Vec<GateId> = serde_json::from_str::<Option<Vec<GateId>>>(&gate_payload)
+            .map_err(|source| Error::InvalidJson {
+                operation: "gate list",
+                source,
+            })?
+            .unwrap_or_default();
+        let gate_ids: BTreeSet<_> = gates.into_iter().map(|gate| gate.id).collect();
+        let blocked_by_gate: BTreeSet<_> = blocked
+            .iter()
+            .filter(|issue| issue.blocked_by.iter().any(|id| gate_ids.contains(id)))
+            .map(|issue| issue.id.as_str())
+            .collect();
+        let blocked_ids: BTreeSet<_> = blocked.iter().map(|issue| issue.id.as_str()).collect();
         for issue in &mut issues {
-            issue.is_blocked = blocked_ids.contains(&issue.id);
+            issue.is_blocked = blocked_ids.contains(issue.id.as_str());
+            issue.blocked_by_gate = blocked_by_gate.contains(issue.id.as_str());
         }
         Ok(issues)
     }
@@ -403,6 +454,35 @@ impl Client {
         Ok(())
     }
 
+    pub fn create_gate(
+        &self,
+        blocks_id: &str,
+        gate_type: &str,
+        reason: &str,
+        timeout: &str,
+    ) -> Result<Gate, Error> {
+        let mut args = vec![
+            "gate", "create", "--type", gate_type, "--blocks", blocks_id, "--reason", reason,
+        ];
+        if !timeout.is_empty() {
+            args.extend(["--timeout", timeout]);
+        }
+        args.push("--json");
+        let payload = self.run(false, &args)?;
+        serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+            operation: "gate create",
+            source,
+        })
+    }
+
+    pub fn resolve_gate(&self, id: &str, reason: &str) -> Result<(), Error> {
+        self.run(
+            false,
+            &["gate", "resolve", id, "--reason", reason, "--json"],
+        )?;
+        Ok(())
+    }
+
     pub fn add_comment(&self, issue_id: &str, text: &str) -> Result<Comment, Error> {
         let payload = self.run(false, &["comments", "add", issue_id, text, "--json"])?;
         serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
@@ -420,6 +500,11 @@ impl Client {
             operation: "dep list",
             source,
         })
+    }
+
+    fn check_time_gates(&self) -> Result<(), Error> {
+        self.run(false, &["gate", "check", "--type", "timer", "--json"])?;
+        Ok(())
     }
 
     fn run(&self, readonly: bool, args: &[&str]) -> Result<String, Error> {
