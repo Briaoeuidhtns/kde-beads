@@ -31,7 +31,7 @@ struct EditorRequest {
 pub(crate) fn issue_update_from_value(value: Value) -> Result<IssueUpdate, String> {
     let (request, status, priority, labels) = parse_editor_request(value)?;
     if request.id.trim().is_empty() {
-        return Err("Cannot save an issue without an ID".to_string());
+        return Err("Cannot save a bead without an ID".to_string());
     }
 
     Ok(IssueUpdate {

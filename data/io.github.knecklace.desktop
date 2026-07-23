@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=Knecklace
-GenericName=Issue Viewer
-Comment=Manage Beads issues on a native KDE board
+GenericName=Bead Viewer
+Comment=Manage beads on a native KDE board
 Exec=knecklace
 Icon=view-task
 Terminal=false
 Categories=Development;Utility;
-Keywords=issues;tasks;beads;project;
+Keywords=beads;project;
 StartupNotify=true

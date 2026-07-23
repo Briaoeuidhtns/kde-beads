@@ -65,7 +65,7 @@
         '';
 
         meta = {
-          description = "Native KDE viewer for Beads issue trackers";
+          description = "Native KDE viewer for Beads repositories";
           license = lib.licenses.mit;
           mainProgram = "knecklace";
           platforms = [ "x86_64-linux" ];
@@ -75,7 +75,7 @@
       apps.${system}.default = {
         type = "app";
         program = lib.getExe self.packages.${system}.default;
-        meta.description = "Browse Beads issues with Knecklace";
+        meta.description = "Browse beads with Knecklace";
       };
 
       checks.${system}.tests = pkgs.rustPlatform.buildRustPackage {

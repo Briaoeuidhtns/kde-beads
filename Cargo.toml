@@ -7,7 +7,7 @@ name = "knecklace"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
-description = "A native KDE viewer for Beads issue trackers"
+description = "A native KDE viewer for Beads repositories"
 license = "MIT"
 
 [[bin]]

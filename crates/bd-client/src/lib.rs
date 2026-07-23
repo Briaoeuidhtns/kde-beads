@@ -506,7 +506,7 @@ impl fmt::Display for Error {
             Self::UnexpectedIssueCount { operation, count } => {
                 write!(
                     formatter,
-                    "bd {operation} returned {count} issues instead of one"
+                    "bd {operation} returned {count} beads instead of one"
                 )
             }
             Self::WorkerPanic(operation) => {

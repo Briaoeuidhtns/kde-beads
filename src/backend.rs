@@ -481,11 +481,11 @@ impl Backend {
         let issue_id = issue_id.trim().to_string();
         let depends_on_id = depends_on_id.trim().to_string();
         if issue_id.is_empty() || depends_on_id.is_empty() {
-            self.set_error("Both relationship issue IDs are required".to_string());
+            self.set_error("Both relationship bead IDs are required".to_string());
             return;
         }
         if issue_id == depends_on_id {
-            self.set_error("An issue cannot depend on itself".to_string());
+            self.set_error("A bead cannot depend on itself".to_string());
             return;
         }
         if !matches!(dependency_type.as_str(), "blocks" | "parent-child") {
@@ -521,7 +521,7 @@ impl Backend {
         let issue_id = issue_id.trim().to_string();
         let text = text.trim().to_string();
         if issue_id.is_empty() {
-            self.set_error("Cannot comment on an issue without an ID".to_string());
+            self.set_error("Cannot comment on a bead without an ID".to_string());
             return;
         }
         if text.is_empty() {
@@ -639,7 +639,7 @@ impl Backend {
                     self.cache.set_error(
                         &workspace,
                         generation,
-                        format!("Could not decode issue list: {error}"),
+                        format!("Could not decode bead list: {error}"),
                     );
                 }
                 Err(_) => {}
@@ -679,7 +679,7 @@ impl Backend {
                         self.cache.set_error(
                             &workspace,
                             generation,
-                            format!("Could not decode issue: {error}"),
+                            format!("Could not decode bead: {error}"),
                         );
                     }
                 }
@@ -996,7 +996,7 @@ impl Backend {
                 self.fail_foreground(
                     &workspace,
                     generation,
-                    format!("Could not decode updated issues: {error}"),
+                    format!("Could not decode updated beads: {error}"),
                 );
                 return None;
             }
@@ -1008,7 +1008,7 @@ impl Backend {
                 self.fail_foreground(
                     &workspace,
                     generation,
-                    format!("Could not encode updated issue: {error}"),
+                    format!("Could not encode updated bead: {error}"),
                 );
                 return None;
             }
@@ -1164,7 +1164,7 @@ fn issues_to_values(issues: Vec<Issue>) -> Result<Vec<Value>, String> {
         .into_iter()
         .map(|issue| {
             serde_json::to_value(issue)
-                .map_err(|error| format!("Could not encode issue list: {error}"))
+                .map_err(|error| format!("Could not encode bead list: {error}"))
         })
         .collect()
 }

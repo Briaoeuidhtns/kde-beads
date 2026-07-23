@@ -74,7 +74,7 @@ Kirigami.Page {
 
     actions: Kirigami.Action {
         objectName: "createTicketAction"
-        text: qsTr("Create Ticket")
+        text: qsTr("Create Bead")
         icon.name: "list-add"
         enabled: !boardPage.backendLoading
         shortcut: "Ctrl+N"

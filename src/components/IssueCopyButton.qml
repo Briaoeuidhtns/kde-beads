@@ -17,7 +17,7 @@ Controls.ToolButton {
     text: qsTr("Copy %1").arg(issueId)
     icon.name: copied ? "dialog-ok" : "edit-copy"
     display: Controls.AbstractButton.IconOnly
-    Controls.ToolTip.text: copied ? qsTr("Copied") : qsTr("Copy issue ID")
+    Controls.ToolTip.text: copied ? qsTr("Copied") : qsTr("Copy bead ID")
     Controls.ToolTip.visible: hovered
 
     function finishFeedbackIfReady() {

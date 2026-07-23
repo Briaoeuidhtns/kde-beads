@@ -71,9 +71,12 @@ Item {
         function test_create_editor_submits_fields() {
             createApp();
             const editor = openCreateEditor();
+            const titleField = findChild(editor, "titleField");
             const statusField = findChild(editor, "statusField");
             const typeField = findChild(editor, "typeField");
-            findChild(editor, "titleField").text = "Test-created issue";
+            compare(editor.title, "Create bead");
+            compare(titleField.placeholderText, "Bead title");
+            titleField.text = "Test-created issue";
             findChild(editor, "descriptionField").text = "Created in Qt Quick Test";
             findChild(editor, "labelsField").text = "qml, kde";
 
@@ -221,6 +224,7 @@ Item {
             const suggestions = findChild(app, "relationshipSuggestions");
             const suggestionList = findChild(app, "relationshipSuggestionList");
             const addButton = findChild(editor, "addRelationshipButton");
+            compare(targetField.placeholderText, "Search bead ID or title");
 
             targetField.forceActiveFocus();
             targetField.text = "searchable";

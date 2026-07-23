@@ -252,7 +252,7 @@ Rectangle {
                 visible: column.showCreateWhenEmpty
                     && column.totalCount === 0
                     && !column.backendLoading
-                text: qsTr("Create ticket")
+                text: qsTr("Create bead")
                 icon.name: "list-add"
                 onClicked: column.createIssueRequested()
             }

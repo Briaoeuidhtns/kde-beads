@@ -69,6 +69,7 @@ Item {
 
             verify(button);
             verify(button.visible);
+            compare(button.text, "Create bead");
             mouseClick(button);
             tryVerify(() => findChild(app, "editorPage") !== null);
         }
@@ -319,6 +320,7 @@ Item {
 
             compare(list.count, 1);
             compare(progress.visible, true);
+            compare(createAction.text, "Create Bead");
             compare(createAction.enabled, true);
             compare(findChild(app, "refreshAction"), null);
             compare(searchField.mapToItem(app.contentItem, 0, 0).y, searchY);
@@ -393,6 +395,7 @@ Item {
             app.selectProject("/tmp/another-project");
 
             tryCompare(dialog, "visible", true);
+            compare(dialog.title, "Close bead windows?");
             compare(dialog.modality, Qt.ApplicationModal);
             compare(dialog.transientParent, app);
             compare(dialog.minimumWidth, dialog.maximumWidth);

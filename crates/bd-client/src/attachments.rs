@@ -476,7 +476,7 @@ impl Client {
     }
 
     fn polyfill_issue_dir(&self, issue_id: &str, create: bool) -> Result<PathBuf, Error> {
-        validate_component(issue_id, "issue ID")?;
+        validate_component(issue_id, "bead ID")?;
         let beads_dir = checked_directory(&self.workspace.join(".beads"), false)?;
         let namespace = checked_directory(&beads_dir.join("knecklace"), create)?;
         let attachments = checked_directory(&namespace.join("attachments"), create)?;
@@ -609,7 +609,7 @@ fn polyfill_attachments(issue: &Issue) -> Result<Vec<PolyfillAttachment>, Error>
 }
 
 fn polyfill_relpath(issue_id: &str, content_hash: &str) -> Result<String, Error> {
-    validate_component(issue_id, "issue ID")?;
+    validate_component(issue_id, "bead ID")?;
     validate_hash(content_hash)?;
     Ok(format!("knecklace/attachments/{issue_id}/{content_hash}"))
 }
@@ -809,8 +809,8 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_storage_components() {
-        assert!(validate_component("bd-123", "issue ID").is_ok());
-        assert!(validate_component("../outside", "issue ID").is_err());
+        assert!(validate_component("bd-123", "bead ID").is_ok());
+        assert!(validate_component("../outside", "bead ID").is_err());
         assert!(validate_component("dir/file", "filename").is_err());
         assert!(validate_hash("ABC").is_err());
     }

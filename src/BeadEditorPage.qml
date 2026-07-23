@@ -79,7 +79,7 @@ Kirigami.ScrollablePage {
     }
 
     title: creating
-        ? qsTr("Create ticket")
+        ? qsTr("Create bead")
         : (titleField.text.length > 0 ? titleField.text : issueId)
 
     Keys.priority: Keys.BeforeItem
@@ -323,7 +323,7 @@ Kirigami.ScrollablePage {
         },
         Kirigami.Action {
             objectName: "createChildAction"
-            text: qsTr("Create child ticket")
+            text: qsTr("Create child bead")
             icon.name: "list-add"
             visible: !editor.creating && typeField.currentValue === "epic"
             enabled: !editor.backend.loading
@@ -542,7 +542,7 @@ Kirigami.ScrollablePage {
                 Kirigami.FormData.label: qsTr("Title:")
                 implicitWidth: editor.formFieldWidth
                 Layout.fillWidth: true
-                placeholderText: qsTr("Issue title")
+                placeholderText: qsTr("Bead title")
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: event => editor.handlePasteEvent(event)
             }
@@ -606,7 +606,7 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
                 Controls.ToolTip.visible: editor.creating && attachmentHover.hovered
-                Controls.ToolTip.text: qsTr("Create the ticket before attaching files")
+                Controls.ToolTip.text: qsTr("Create the bead before attaching files")
 
                 HoverHandler {
                     id: attachmentHover
@@ -811,7 +811,7 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
                 Controls.ToolTip.visible: editor.creating && relationshipHover.hovered
-                Controls.ToolTip.text: qsTr("Create the ticket before linking issues")
+                Controls.ToolTip.text: qsTr("Create the bead before linking beads")
 
                 HoverHandler {
                     id: relationshipHover
@@ -831,7 +831,7 @@ Kirigami.ScrollablePage {
                     visible: (editor.detailReady || editor.hydratingCreatedIssue)
                         && editor.dependencies.length === 0
                         && editor.dependents.length === 0
-                    text: qsTr("No linked issues")
+                    text: qsTr("No linked beads")
                     color: Kirigami.Theme.disabledTextColor
                 }
 
@@ -882,8 +882,8 @@ Kirigami.ScrollablePage {
                         objectName: "relationshipTargetField"
                         Layout.fillWidth: true
                         property var candidates: editor.relationshipCandidates(text)
-                        placeholderText: qsTr("Search issue ID or title")
-                        Accessible.description: qsTr("Search issues by ID or title")
+                        placeholderText: qsTr("Search bead ID or title")
+                        Accessible.description: qsTr("Search beads by ID or title")
                         Keys.priority: Keys.BeforeItem
                         Keys.onPressed: event => editor.handlePasteEvent(event)
 
@@ -943,8 +943,8 @@ Kirigami.ScrollablePage {
                         Controls.ToolTip.visible: addRelationshipHover.hovered
                             && !addRelationshipButton.enabled
                         Controls.ToolTip.text: relationshipTargetField.candidates.length > 0
-                            ? qsTr("Select an issue from the suggestions")
-                            : qsTr("No unlinked issue matches this search")
+                            ? qsTr("Select a bead from the suggestions")
+                            : qsTr("No unlinked bead matches this search")
 
                         HoverHandler {
                             id: addRelationshipHover

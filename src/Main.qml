@@ -263,7 +263,7 @@ Kirigami.ApplicationWindow {
         modality: Qt.ApplicationModal
         flags: Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
         transientParent: root
-        title: qsTr("Close issue windows?")
+        title: qsTr("Close bead windows?")
         color: Kirigami.Theme.backgroundColor
 
         function open() {
@@ -297,7 +297,7 @@ Kirigami.ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 text: qsTr(
-                    "Knecklace must close %n open issue window(s) before switching to %1. Any unsaved changes will be lost.",
+                    "Knecklace must close %n open bead window(s) before switching to %1. Any unsaved changes will be lost.",
                     "",
                     root.editorPages.length
                 ).arg(root.pendingProjectPath)
