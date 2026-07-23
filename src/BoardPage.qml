@@ -24,7 +24,6 @@ Kirigami.Page {
     signal openIssueRequested(string issueId)
     signal moveIssueRequested(string issueId, string status)
     signal copyIssueIdRequested(string issueId)
-    signal refreshRequested()
     signal dismissErrorRequested()
 
     title: qsTr("Beads")
@@ -73,24 +72,25 @@ Kirigami.Page {
         return closed.filter(issue => closedTimestamp(issue) >= cutoff.getTime());
     }
 
-    actions: [
-        Kirigami.Action {
-            objectName: "createTicketAction"
-            text: qsTr("Create Ticket")
-            icon.name: "list-add"
-            enabled: !boardPage.backendLoading
-            shortcut: "Ctrl+N"
-            onTriggered: boardPage.createIssueRequested()
-        },
-        Kirigami.Action {
-            objectName: "refreshAction"
-            text: qsTr("Refresh")
-            icon.name: "view-refresh"
-            enabled: !boardPage.backendLoading && !boardPage.backendRefreshing
-            shortcut: StandardKey.Refresh
-            onTriggered: boardPage.refreshRequested()
-        }
-    ]
+    actions: Kirigami.Action {
+        objectName: "createTicketAction"
+        text: qsTr("Create Ticket")
+        icon.name: "list-add"
+        enabled: !boardPage.backendLoading
+        shortcut: "Ctrl+N"
+        onTriggered: boardPage.createIssueRequested()
+    }
+
+    Controls.ProgressBar {
+        objectName: "boardProgress"
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: Kirigami.Units.smallSpacing
+        indeterminate: true
+        visible: boardPage.backendLoading || boardPage.backendRefreshing
+        z: 1
+    }
 
     Board.CardDragProxy {
         id: cardDragProxy
@@ -99,16 +99,6 @@ Kirigami.Page {
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-
-        Controls.ProgressBar {
-            objectName: "boardProgress"
-            Layout.fillWidth: true
-            implicitHeight: boardPage.backendLoading || boardPage.backendRefreshing
-                ? Kirigami.Units.smallSpacing
-                : 0
-            indeterminate: true
-            visible: boardPage.backendLoading || boardPage.backendRefreshing
-        }
 
         Kirigami.InlineMessage {
             Layout.fillWidth: true
@@ -162,6 +152,7 @@ Kirigami.Page {
 
             Controls.TextField {
                 id: searchField
+                objectName: "searchField"
                 placeholderText: qsTr("Search title, ID, description, label, or assignee")
                 leftPadding: Kirigami.Units.gridUnit * 2
                 Layout.fillWidth: true

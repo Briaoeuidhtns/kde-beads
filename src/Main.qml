@@ -186,7 +186,6 @@ Kirigami.ApplicationWindow {
         onOpenIssueRequested: issueId => root.openEditor(issueId)
         onMoveIssueRequested: (issueId, status) => Backend.moveIssue(issueId, status)
         onCopyIssueIdRequested: issueId => root.copyIssueId(issueId)
-        onRefreshRequested: Backend.reload()
         onDismissErrorRequested: Backend.clearError()
     }
 }

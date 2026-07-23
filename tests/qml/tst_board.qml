@@ -310,14 +310,16 @@ Item {
             createApp([issue("cached-issue", "open")]);
             const progress = findChild(app, "boardProgress");
             const createAction = findChild(app, "createTicketAction");
-            const refreshAction = findChild(app, "refreshAction");
+            const searchField = findChild(app, "searchField");
             const list = findChild(app, "cardList-open");
+            const searchY = searchField.mapToItem(app.contentItem, 0, 0).y;
             Backend.refreshing = true;
 
             compare(list.count, 1);
             compare(progress.visible, true);
             compare(createAction.enabled, true);
-            compare(refreshAction.enabled, false);
+            compare(findChild(app, "refreshAction"), null);
+            compare(searchField.mapToItem(app.contentItem, 0, 0).y, searchY);
         }
 
         function test_project_sidebar_becomes_modal_on_narrow_windows() {
