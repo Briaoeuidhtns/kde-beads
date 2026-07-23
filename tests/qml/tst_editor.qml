@@ -303,11 +303,17 @@ Item {
             tryVerify(() => findChild(app, "editorPage") !== null);
             const editor = findChild(app, "editorPage");
             editor.detailReady = true;
+            const typeField = findChild(editor, "relationshipTypeField");
             const targetField = findChild(editor, "relationshipTargetField");
             const suggestions = findChild(app, "relationshipSuggestions");
             const suggestionList = findChild(app, "relationshipSuggestionList");
             const addButton = findChild(editor, "addRelationshipButton");
             compare(targetField.placeholderText, "Search bead ID or title");
+            compare(typeField.count, 4);
+            compare(typeField.valueAt(0), "blocked-by");
+            compare(typeField.valueAt(1), "blocks");
+            compare(typeField.valueAt(2), "parent");
+            compare(typeField.valueAt(3), "child");
 
             targetField.forceActiveFocus();
             targetField.text = "searchable";
@@ -334,6 +340,30 @@ Item {
             compare(Backend.lastDependencyIssueId, "test-existing");
             compare(Backend.lastDependsOnId, "test-blocker");
             compare(Backend.lastDependencyType, "blocks");
+
+            typeField.currentIndex = 1;
+            targetField.text = "test-blocker";
+            editor.addRelationship();
+            compare(Backend.addDependencyCallCount, 2);
+            compare(Backend.lastDependencyIssueId, "test-blocker");
+            compare(Backend.lastDependsOnId, "test-existing");
+            compare(Backend.lastDependencyType, "blocks");
+
+            typeField.currentIndex = 2;
+            targetField.text = "test-blocker";
+            editor.addRelationship();
+            compare(Backend.addDependencyCallCount, 3);
+            compare(Backend.lastDependencyIssueId, "test-existing");
+            compare(Backend.lastDependsOnId, "test-blocker");
+            compare(Backend.lastDependencyType, "parent-child");
+
+            typeField.currentIndex = 3;
+            targetField.text = "test-blocker";
+            editor.addRelationship();
+            compare(Backend.addDependencyCallCount, 4);
+            compare(Backend.lastDependencyIssueId, "test-blocker");
+            compare(Backend.lastDependsOnId, "test-existing");
+            compare(Backend.lastDependencyType, "parent-child");
         }
 
         function test_existing_issue_displays_and_submits_comments() {

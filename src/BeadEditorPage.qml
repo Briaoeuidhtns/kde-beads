@@ -292,8 +292,17 @@ Kirigami.ScrollablePage {
         const targetId = relationshipTargetId();
         if (targetId.length === 0)
             return;
+        const relationship = relationshipTypeField.currentValue;
+        const reverse = relationship === "blocks" || relationship === "child";
+        const dependencyType = relationship === "parent" || relationship === "child"
+            ? "parent-child"
+            : "blocks";
         preserveFieldsWhileLoading = true;
-        editor.backend.addDependency(issueId, targetId, relationshipTypeField.currentValue);
+        editor.backend.addDependency(
+            reverse ? targetId : issueId,
+            reverse ? issueId : targetId,
+            dependencyType
+        );
         relationshipTargetField.clear();
     }
 
@@ -931,8 +940,10 @@ Kirigami.ScrollablePage {
                         textRole: "text"
                         valueRole: "value"
                         model: [
-                            { "text": qsTr("Blocked by"), "value": "blocks" },
-                            { "text": qsTr("Parent epic"), "value": "parent-child" }
+                            { "text": qsTr("Blocked by"), "value": "blocked-by" },
+                            { "text": qsTr("Blocks"), "value": "blocks" },
+                            { "text": qsTr("Parent epic"), "value": "parent" },
+                            { "text": qsTr("Child"), "value": "child" }
                         ]
                     }
                     Controls.TextField {
