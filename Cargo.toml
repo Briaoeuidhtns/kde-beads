@@ -3,7 +3,7 @@ members = ["crates/bd-client"]
 resolver = "3"
 
 [package]
-name = "kde_beads"
+name = "knecklace"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
@@ -11,7 +11,7 @@ description = "A native KDE viewer for Beads issue trackers"
 license = "MIT"
 
 [[bin]]
-name = "kde-beads"
+name = "knecklace"
 path = "src/main.rs"
 
 [dependencies]

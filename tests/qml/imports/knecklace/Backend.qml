@@ -7,7 +7,7 @@ import QtQml
 QtObject {
     property var issues: []
     property var detail: ({})
-    property string workspace: "/tmp/kde-beads-tests"
+    property string workspace: "/tmp/knecklace-tests"
     property bool startupWorkspaceExplicit: false
     property string errorMessage: ""
     property bool loading: false
@@ -51,7 +51,7 @@ QtObject {
     function reset() {
         issues = [];
         detail = {};
-        workspace = "/tmp/kde-beads-tests";
+        workspace = "/tmp/knecklace-tests";
         startupWorkspaceExplicit = false;
         errorMessage = "";
         loading = false;

@@ -3,7 +3,7 @@
 import QtQuick
 import QtQuick.Controls as Controls
 import QtTest
-import kde_beads
+import knecklace
 import "../../src" as App
 
 Item {
@@ -278,7 +278,7 @@ Item {
             compare(sidebar.drawerOpen, true);
             compare(sidebar.collapsible, true);
             compare(list.count, 1);
-            compare(list.itemAt(0).text, "kde-beads-tests");
+            compare(list.itemAt(0).text, "knecklace-tests");
             compare(list.itemAt(0).highlighted, true);
 
             addButton.clicked();

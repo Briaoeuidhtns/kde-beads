@@ -22,7 +22,7 @@ fn main() {
     include_bytes_qml!("board/OpenColumn.qml", "qml");
 
     QApp::new()
-        .application_name("kde-beads")
+        .application_name("knecklace")
         .register::<Backend>()
         .load_qml_from_file("qrc:/qml/Main.qml")
         .run();

@@ -2,7 +2,7 @@
 
 import QtQuick
 import QtTest
-import kde_beads
+import knecklace
 import "../../src" as App
 
 Item {

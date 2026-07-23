@@ -1,2 +1,2 @@
-module kde_beads
+module knecklace
 singleton Backend 1.0 Backend.qml

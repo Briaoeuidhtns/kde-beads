@@ -3,4 +3,4 @@ fail-fast = false
 
 [profile.ci.junit]
 path = "junit.xml"
-report-name = "kde-beads-rust"
+report-name = "knecklace-rust"

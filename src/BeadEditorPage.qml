@@ -702,7 +702,7 @@ Kirigami.ScrollablePage {
                                 Controls.Label {
                                     text: {
                                         const provider = attachmentRow.modelData.provider === "polyfill"
-                                            ? qsTr("KDE Beads local")
+                                            ? qsTr("Knecklace local")
                                             : qsTr("Beads");
                                         const missing = attachmentRow.modelData.missing
                                             ? ` · ${qsTr("missing locally")}`

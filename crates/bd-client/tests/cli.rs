@@ -289,7 +289,7 @@ fn migrates_polyfill_after_repairing_missing_native_bytes() {
         !migrated
             .metadata
             .keys()
-            .any(|key| key.starts_with("kde_beads.attachment_"))
+            .any(|key| key.starts_with("knecklace.attachment_"))
     );
     assert_eq!(
         fs::read(workspace.path().join(format!(".fake-native-{hash}")))
@@ -299,7 +299,7 @@ fn migrates_polyfill_after_repairing_missing_native_bytes() {
     assert!(
         !workspace
             .path()
-            .join(format!(".beads/kde-beads/attachments/{}/{hash}", issue.id))
+            .join(format!(".beads/knecklace/attachments/{}/{hash}", issue.id))
             .exists()
     );
 }

@@ -35,7 +35,7 @@
     in
     {
       packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
-        pname = "kde-beads";
+        pname = "knecklace";
         version = "0.1.0";
         src = ./.;
 
@@ -60,14 +60,14 @@
         ];
 
         postInstall = ''
-          install -Dm644 data/io.github.kde_beads.desktop \
-            $out/share/applications/io.github.kde_beads.desktop
+          install -Dm644 data/io.github.knecklace.desktop \
+            $out/share/applications/io.github.knecklace.desktop
         '';
 
         meta = {
           description = "Native KDE viewer for Beads issue trackers";
           license = lib.licenses.mit;
-          mainProgram = "kde-beads";
+          mainProgram = "knecklace";
           platforms = [ "x86_64-linux" ];
         };
       };
@@ -75,11 +75,11 @@
       apps.${system}.default = {
         type = "app";
         program = lib.getExe self.packages.${system}.default;
-        meta.description = "Browse Beads issues with KDE Beads";
+        meta.description = "Browse Beads issues with Knecklace";
       };
 
       checks.${system}.tests = pkgs.rustPlatform.buildRustPackage {
-        pname = "kde-beads-tests";
+        pname = "knecklace-tests";
         version = "0.1.0";
         src = self;
 

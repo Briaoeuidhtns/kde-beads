@@ -6,7 +6,7 @@ import QtQuick
 import QtCore
 import org.kde.kirigami as Kirigami
 import org.kde.kquickcontrolsaddons as KQuickControlsAddons
-import kde_beads
+import knecklace
 
 Kirigami.ApplicationWindow {
     id: root
@@ -17,7 +17,7 @@ Kirigami.ApplicationWindow {
     minimumWidth: 680
     minimumHeight: 520
     visible: true
-    title: qsTr("Beads")
+    title: qsTr("Knecklace")
 
     property bool projectPersistenceEnabled: true
     property var knownProjects: []

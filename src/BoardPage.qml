@@ -26,7 +26,7 @@ Kirigami.Page {
     signal copyIssueIdRequested(string issueId)
     signal dismissErrorRequested()
 
-    title: qsTr("Beads")
+    title: qsTr("Knecklace")
     padding: 0
 
     function boardStatus(issue) {

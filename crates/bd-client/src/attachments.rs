@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 use super::{Client, Error, Issue, parse_single_issue};
 
-const METADATA_PREFIX: &str = "kde_beads.attachment_";
+const METADATA_PREFIX: &str = "knecklace.attachment_";
 const RECORD_VERSION: u8 = 1;
 const HASH_ALGORITHM: &str = "sha256";
 
@@ -478,7 +478,7 @@ impl Client {
     fn polyfill_issue_dir(&self, issue_id: &str, create: bool) -> Result<PathBuf, Error> {
         validate_component(issue_id, "issue ID")?;
         let beads_dir = checked_directory(&self.workspace.join(".beads"), false)?;
-        let namespace = checked_directory(&beads_dir.join("kde-beads"), create)?;
+        let namespace = checked_directory(&beads_dir.join("knecklace"), create)?;
         let attachments = checked_directory(&namespace.join("attachments"), create)?;
         checked_directory(&attachments.join(issue_id), create)
     }
@@ -490,7 +490,7 @@ impl Client {
 
     fn acquire_polyfill_lock(&self) -> Result<PolyfillLock, Error> {
         let beads_dir = checked_directory(&self.workspace.join(".beads"), false)?;
-        let namespace = checked_directory(&beads_dir.join("kde-beads"), true)?;
+        let namespace = checked_directory(&beads_dir.join("knecklace"), true)?;
         let path = namespace.join("attachments.lock");
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
@@ -534,7 +534,7 @@ impl Client {
         validate_hash(&attachment.content_hash)?;
         validate_component(&attachment.original_filename, "attachment filename")?;
         let beads_dir = checked_directory(&self.workspace.join(".beads"), false)?;
-        let namespace = checked_directory(&beads_dir.join("kde-beads"), true)?;
+        let namespace = checked_directory(&beads_dir.join("knecklace"), true)?;
         let migration = checked_directory(&namespace.join("migration"), true)?;
         let hash_dir = checked_directory(&migration.join(&attachment.content_hash), true)?;
         let path = hash_dir.join(&attachment.original_filename);
@@ -611,7 +611,7 @@ fn polyfill_attachments(issue: &Issue) -> Result<Vec<PolyfillAttachment>, Error>
 fn polyfill_relpath(issue_id: &str, content_hash: &str) -> Result<String, Error> {
     validate_component(issue_id, "issue ID")?;
     validate_hash(content_hash)?;
-    Ok(format!("kde-beads/attachments/{issue_id}/{content_hash}"))
+    Ok(format!("knecklace/attachments/{issue_id}/{content_hash}"))
 }
 
 fn checked_directory(path: &Path, create: bool) -> Result<PathBuf, Error> {
@@ -768,7 +768,7 @@ fn unique_temp_path(parent: &Path) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    parent.join(format!(".kde-beads-{}-{nonce}.tmp", std::process::id()))
+    parent.join(format!(".knecklace-{}-{nonce}.tmp", std::process::id()))
 }
 
 fn utf8_path(path: &Path) -> Result<&str, Error> {
@@ -792,7 +792,7 @@ mod tests {
         metadata.insert(
             format!("{METADATA_PREFIX}{hash}"),
             Value::String(
-                format!(r#"{{"version":1,"id":"polyfill:{hash}","hash_algorithm":"sha256","content_hash":"{hash}","original_filename":"shot.png","mime_type":"image/png","byte_size":4,"storage_relpath":"kde-beads/attachments/bd-1/{hash}"}}"#),
+                format!(r#"{{"version":1,"id":"polyfill:{hash}","hash_algorithm":"sha256","content_hash":"{hash}","original_filename":"shot.png","mime_type":"image/png","byte_size":4,"storage_relpath":"knecklace/attachments/bd-1/{hash}"}}"#),
             ),
         );
         let issue = Issue {
@@ -832,7 +832,7 @@ mod tests {
         let directory = tempfile::TempDir::new().unwrap();
         fs::create_dir(directory.path().join(".beads")).unwrap();
         let client = Client::with_binary(directory.path(), "bd").unwrap();
-        let lock_path = directory.path().join(".beads/kde-beads/attachments.lock");
+        let lock_path = directory.path().join(".beads/knecklace/attachments.lock");
 
         let lock = client.acquire_polyfill_lock().unwrap();
         assert!(lock_path.is_file());
