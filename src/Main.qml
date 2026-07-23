@@ -197,7 +197,7 @@ Kirigami.ApplicationWindow {
         for (const editor of editors) {
             const window = editor.Window.window;
             if (window)
-                window.close();
+                window.discardAndClose();
         }
     }
 

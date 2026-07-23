@@ -31,6 +31,8 @@ Kirigami.ScrollablePage {
     property bool commentSubmitting: false
     property bool refreshWhenCurrent: false
     property bool hydratingCreatedIssue: false
+    property bool closeAfterSave: false
+    property string cleanFormState: ""
     property var localDetail: ({})
     property var attachmentPreviews: ({})
     property alias commentDraft: commentField.text
@@ -45,6 +47,11 @@ Kirigami.ScrollablePage {
             && hostStack.currentItem === editor
             && selected
     )
+    readonly property bool canSave: !backend.loading
+        && titleField.text.trim().length > 0
+        && (creating || detailReady)
+    readonly property bool dirty: cleanFormState.length > 0
+        && cleanFormState !== JSON.stringify(formValues())
     readonly property real formFieldWidth: Math.max(
         Kirigami.Units.gridUnit * 16,
         Math.min(
@@ -129,6 +136,27 @@ Kirigami.ScrollablePage {
         return Math.max(0, index);
     }
 
+    function formValues() {
+        return {
+            "id": issueId,
+            "title": titleField.text,
+            "description": descriptionField.text,
+            "acceptanceCriteria": acceptanceField.text,
+            "design": designField.text,
+            "notes": notesField.text,
+            "status": statusField.currentValue,
+            "priority": String(priorityField.currentIndex),
+            "issueType": typeField.currentValue,
+            "assignee": assigneeField.text,
+            "labels": labelsField.text,
+            "parentId": parentId
+        };
+    }
+
+    function markClean() {
+        cleanFormState = JSON.stringify(formValues());
+    }
+
     function populate() {
         if (creating)
             return;
@@ -145,12 +173,14 @@ Kirigami.ScrollablePage {
         typeField.currentIndex = typeIndex(issue.issue_type || "task");
         assigneeField.text = issue.assignee || "";
         labelsField.text = issue.labels ? issue.labels.join(", ") : "";
+        markClean();
     }
 
     function initializeCreate() {
         statusField.currentIndex = 0;
         priorityField.currentIndex = 2;
         typeField.currentIndex = 2;
+        markClean();
         titleField.forceActiveFocus();
     }
 
@@ -292,32 +322,24 @@ Kirigami.ScrollablePage {
         return true;
     }
 
-    function save() {
-        const request = {
-            "id": issueId,
-            "title": titleField.text,
-            "description": descriptionField.text,
-            "acceptanceCriteria": acceptanceField.text,
-            "design": designField.text,
-            "notes": notesField.text,
-            "status": statusField.currentValue,
-            "priority": String(priorityField.currentIndex),
-            "issueType": typeField.currentValue,
-            "assignee": assigneeField.text,
-            "labels": labelsField.text,
-            "parentId": parentId
-        };
+    function save(closeWhenFinished) {
+        if (backend.loading || titleField.text.trim().length === 0)
+            return false;
+        closeAfterSave = Boolean(closeWhenFinished);
+        preserveFieldsWhileLoading = true;
+        const request = formValues();
         if (creating)
             editor.backend.createIssue(request);
         else
             editor.backend.saveIssue(request);
+        return true;
     }
 
     actions: [
         Kirigami.Action {
             text: editor.creating ? qsTr("Create") : qsTr("Save")
             icon.name: editor.creating ? "list-add" : "document-save"
-            enabled: !editor.backend.loading && titleField.text.trim().length > 0
+            enabled: editor.canSave
             shortcut: StandardKey.Save
             onTriggered: editor.save()
         },
@@ -411,9 +433,16 @@ Kirigami.ScrollablePage {
                 editor.parentId = "";
                 editor.localDetail = editor.backend.detail;
                 editor.populate();
+                if (editor.closeAfterSave) {
+                    editor.closeAfterSave = false;
+                    editor.closeRequested();
+                    return;
+                }
                 editor.hydratingCreatedIssue = true;
                 editor.requestDetail();
             } else if (savedId === editor.issueId) {
+                editor.markClean();
+                editor.closeAfterSave = false;
                 editor.closeRequested();
             } else if (editor.isCurrent) {
                 editor.backend.loadIssue(editor.issueId);
@@ -1170,7 +1199,60 @@ Kirigami.ScrollablePage {
                     }
                 }
             }
+        }
 
+        RowLayout {
+            objectName: "editorButtonBox"
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
+
+            Item { Layout.fillWidth: true }
+            Controls.Button {
+                objectName: "closeEditorButton"
+                text: editor.creating ? qsTr("Cancel") : qsTr("Close")
+                icon.name: "dialog-close"
+                onClicked: editor.closeRequested()
+            }
+
+            RowLayout {
+                spacing: 0
+
+                Controls.Button {
+                    objectName: "bottomSaveButton"
+                    text: editor.creating ? qsTr("Create") : qsTr("Save")
+                    icon.name: editor.creating ? "list-add" : "document-save"
+                    enabled: editor.canSave
+                    highlighted: true
+                    onClicked: editor.save(false)
+                }
+                Controls.Button {
+                    id: createOptionsButton
+                    objectName: "createOptionsButton"
+                    text: qsTr("More create options")
+                    icon.name: "arrow-down"
+                    display: Controls.AbstractButton.IconOnly
+                    visible: editor.creating
+                    enabled: editor.canSave
+                    highlighted: true
+                    Layout.preferredWidth: implicitHeight
+                    onClicked: createOptionsMenu.open()
+
+                    Controls.Menu {
+                        id: createOptionsMenu
+                        objectName: "createOptionsMenu"
+                        x: Math.max(0, createOptionsButton.width - width)
+                        y: createOptionsButton.height
+
+                        Controls.MenuItem {
+                            objectName: "createAndCloseButton"
+                            text: qsTr("Create and Close")
+                            icon.name: "dialog-ok"
+                            enabled: editor.canSave
+                            onTriggered: editor.save(true)
+                        }
+                    }
+                }
+            }
         }
     }
 }

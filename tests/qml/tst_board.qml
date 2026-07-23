@@ -413,6 +413,9 @@ Item {
             app.rememberProject("/tmp/another-project");
             app.openCreate();
             tryCompare(app, "editorLayerOpen", true);
+            const editor = findChild(app, "editorPage");
+            findChild(editor, "titleField").text = "Unsaved bead";
+            tryCompare(editor, "dirty", true);
             const dialog = findChild(app, "projectSwitchDialog");
 
             app.selectProject("/tmp/another-project");
@@ -420,6 +423,7 @@ Item {
             dialog.accept();
 
             tryCompare(app, "editorLayerOpen", false);
+            compare(findChild(app, "unsavedChangesDialog"), null);
             compare(Backend.switchWorkspaceCallCount, 1);
             compare(Backend.workspace, "/tmp/another-project");
         }

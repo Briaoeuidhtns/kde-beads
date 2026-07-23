@@ -74,8 +74,11 @@ Item {
             const titleField = findChild(editor, "titleField");
             const statusField = findChild(editor, "statusField");
             const typeField = findChild(editor, "typeField");
+            const saveButton = findChild(editor, "bottomSaveButton");
             compare(editor.title, "Create bead");
             compare(titleField.placeholderText, "Bead title");
+            compare(editor.dirty, false);
+            compare(saveButton.text, "Create");
             titleField.text = "Test-created issue";
             findChild(editor, "descriptionField").text = "Created in Qt Quick Test";
             findChild(editor, "labelsField").text = "qml, kde";
@@ -87,7 +90,8 @@ Item {
             compare(typeField.count, 6);
             compare(typeField.currentValue, "task");
 
-            editor.save();
+            tryCompare(editor, "dirty", true);
+            saveButton.clicked();
 
             compare(Backend.createIssueCallCount, 1);
             compare(Backend.lastCreatedRequest.title, "Test-created issue");
@@ -159,6 +163,48 @@ Item {
             compare(form.enabled, true);
             compare(titleField.enabled, true);
             compare(titleField.text, "Loaded bead");
+        }
+
+        function test_existing_editor_tracks_and_preserves_dirty_fields() {
+            Backend.issues = [issue("test-dirty", "open")];
+            Backend.detail = {
+                "id": "test-dirty",
+                "title": "Original title",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-dirty");
+            const editor = findChild(app, "editorPage");
+            const titleField = findChild(editor, "titleField");
+            const saveButton = findChild(editor, "bottomSaveButton");
+            const createOptionsButton = findChild(editor, "createOptionsButton");
+            editor.detailReady = true;
+
+            compare(editor.dirty, false);
+            compare(saveButton.text, "Save");
+            compare(createOptionsButton.visible, false);
+            titleField.text = "Changed title";
+            tryCompare(editor, "dirty", true);
+            titleField.text = "Original title";
+            tryCompare(editor, "dirty", false);
+
+            titleField.text = "Retry this title";
+            editor.save();
+            compare(editor.preserveFieldsWhileLoading, true);
+            Backend.loading = true;
+            Backend.errorMessage = "Save failed";
+            Backend.loading = false;
+
+            compare(titleField.text, "Retry this title");
+            compare(editor.dirty, true);
+            compare(editor.preserveFieldsWhileLoading, false);
         }
 
         function test_legacy_blocked_status_is_preserved_on_save() {
@@ -419,6 +465,97 @@ Item {
             openCreateEditor();
 
             keyClick(Qt.Key_Escape);
+
+            tryVerify(() => findChild(app, "editorPage") === null);
+        }
+
+        function test_dirty_editor_prompts_to_save_discard_or_cancel() {
+            createApp();
+            const editor = openCreateEditor();
+            const issueWindow = editor.Window.window;
+            const dialog = findChild(issueWindow, "unsavedChangesDialog");
+            const titleField = findChild(editor, "titleField");
+            const cancelButton = findChild(issueWindow, "cancelCloseButton");
+            const discardButton = findChild(issueWindow, "discardChangesButton");
+
+            titleField.text = "Unsaved bead";
+            tryCompare(editor, "dirty", true);
+            keyClick(Qt.Key_Escape);
+
+            tryCompare(dialog, "opened", true);
+            compare(issueWindow.visible, true);
+            cancelButton.clicked();
+            tryCompare(dialog, "opened", false);
+            compare(issueWindow.visible, true);
+
+            issueWindow.close();
+            tryCompare(dialog, "opened", true);
+            discardButton.clicked();
+
+            tryVerify(() => findChild(app, "editorPage") === null);
+        }
+
+        function test_prompt_save_creates_bead_before_closing() {
+            createApp();
+            const editor = openCreateEditor();
+            const issueWindow = editor.Window.window;
+            const dialog = findChild(issueWindow, "unsavedChangesDialog");
+            const saveButton = findChild(issueWindow, "saveChangesButton");
+            findChild(editor, "titleField").text = "Save before closing";
+
+            editor.closeRequested();
+            tryCompare(dialog, "opened", true);
+            saveButton.clicked();
+
+            compare(Backend.createIssueCallCount, 1);
+            compare(issueWindow.visible, true);
+            Backend.detail = {
+                "id": "test-saved-on-close",
+                "title": "Save before closing",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            Backend.issueSaved("test-saved-on-close");
+
+            tryVerify(() => findChild(app, "editorPage") === null);
+        }
+
+        function test_create_and_close_waits_for_created_bead() {
+            createApp();
+            const editor = openCreateEditor();
+            const issueWindow = editor.Window.window;
+            const createOptionsButton = findChild(editor, "createOptionsButton");
+            const createOptionsMenu = findChild(editor, "createOptionsMenu");
+            const createAndCloseButton = findChild(editor, "createAndCloseButton");
+            findChild(editor, "titleField").text = "Create and close";
+
+            compare(createOptionsButton.visible, true);
+            createOptionsButton.clicked();
+            tryCompare(createOptionsMenu, "opened", true);
+            createAndCloseButton.triggered();
+
+            compare(Backend.createIssueCallCount, 1);
+            compare(editor.closeAfterSave, true);
+            compare(issueWindow.visible, true);
+            Backend.detail = {
+                "id": "test-create-and-close",
+                "title": "Create and close",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            Backend.issueSaved("test-create-and-close");
 
             tryVerify(() => findChild(app, "editorPage") === null);
         }

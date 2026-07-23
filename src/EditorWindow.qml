@@ -3,6 +3,8 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls as Controls
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
 Kirigami.ApplicationWindow {
@@ -16,6 +18,7 @@ Kirigami.ApplicationWindow {
     property alias creating: editor.creating
     property alias parentId: editor.parentId
     property bool initialized: false
+    property bool forceClosing: false
 
     signal editorOpened(var editor)
     signal editorClosed(var editor)
@@ -26,6 +29,20 @@ Kirigami.ApplicationWindow {
 
     function attractAttention() {
         attentionAnimation.restart();
+    }
+
+    function requestClose() {
+        if (editor.dirty) {
+            if (!unsavedChangesDialog.opened)
+                unsavedChangesDialog.open();
+            return;
+        }
+        close();
+    }
+
+    function discardAndClose() {
+        forceClosing = true;
+        close();
     }
 
     width: Kirigami.Units.gridUnit * 50
@@ -42,6 +59,13 @@ Kirigami.ApplicationWindow {
         requestActivate();
     }
     Component.onDestruction: editorClosed(editor)
+    onClosing: closeEvent => {
+        if (!forceClosing && editor.dirty) {
+            closeEvent.accepted = false;
+            if (!unsavedChangesDialog.opened)
+                unsavedChangesDialog.open();
+        }
+    }
     onActiveChanged: {
         if (initialized && active)
             editorActivated(editor);
@@ -56,10 +80,63 @@ Kirigami.ApplicationWindow {
         backend: editorWindow.backend
         clipboard: editorWindow.clipboard
         selected: editorWindow.activeEditor === editor
-        onCloseRequested: editorWindow.close()
+        onCloseRequested: editorWindow.requestClose()
         onCreateChildRequested: parentId => editorWindow.createChildRequested(parentId)
         onOpenIssueRequested: issueId => editorWindow.openIssueRequested(issueId)
         onCopyIssueIdRequested: issueId => editorWindow.copyIssueIdRequested(issueId)
+    }
+
+    Controls.Dialog {
+        id: unsavedChangesDialog
+        objectName: "unsavedChangesDialog"
+        parent: Controls.Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(
+            Kirigami.Units.gridUnit * 28,
+            parent.width - Kirigami.Units.largeSpacing * 4
+        )
+        modal: true
+        focus: true
+        closePolicy: Controls.Popup.CloseOnEscape
+        title: qsTr("Save changes?")
+
+        contentItem: Controls.Label {
+            text: editor.creating
+                ? qsTr("This bead has not been created. Save it before closing?")
+                : qsTr("This bead has unsaved changes. Save them before closing?")
+            wrapMode: Text.WordWrap
+        }
+
+        footer: Controls.DialogButtonBox {
+            Controls.Button {
+                objectName: "cancelCloseButton"
+                text: qsTr("Cancel")
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.RejectRole
+            }
+            Controls.Button {
+                objectName: "discardChangesButton"
+                text: qsTr("Discard")
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.DestructiveRole
+            }
+            Controls.Button {
+                objectName: "saveChangesButton"
+                text: qsTr("Save")
+                icon.name: "document-save"
+                enabled: editor.canSave
+                highlighted: true
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.AcceptRole
+            }
+
+            onAccepted: {
+                if (editor.save(true))
+                    unsavedChangesDialog.close();
+            }
+            onDiscarded: {
+                unsavedChangesDialog.close();
+                editorWindow.discardAndClose();
+            }
+            onRejected: unsavedChangesDialog.close()
+        }
     }
 
     Item {
