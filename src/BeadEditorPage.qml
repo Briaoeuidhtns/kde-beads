@@ -6,6 +6,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigami.layouts as KirigamiLayouts
 import "components" as Components
 
 Kirigami.ScrollablePage {
@@ -14,7 +15,7 @@ Kirigami.ScrollablePage {
 
     required property var backend
     required property var clipboard
-    required property var layerStack
+    required property bool selected
 
     signal closeRequested()
     signal createChildRequested(string parentId)
@@ -38,6 +39,12 @@ Kirigami.ScrollablePage {
     readonly property var dependencies: relationshipDetail.dependencies || []
     readonly property var dependents: relationshipDetail.dependents || []
     readonly property var comments: localDetail.comments || []
+    readonly property var hostStack: KirigamiLayouts.PageStack.pageStack
+    readonly property bool isCurrent: Boolean(
+        hostStack
+            && hostStack.currentItem === editor
+            && selected
+    )
     readonly property real formFieldWidth: Math.max(
         Kirigami.Units.gridUnit * 16,
         Math.min(
@@ -332,7 +339,7 @@ Kirigami.ScrollablePage {
     Shortcut {
         objectName: "attachmentPasteShortcut"
         sequences: [StandardKey.Paste]
-        enabled: editor.layerStack.currentItem === editor
+        enabled: editor.isCurrent
             && editor.canAttachFiles()
             && editor.clipboardFileUrls().length > 0
         onActivated: editor.attachFileUrls(editor.clipboardFileUrls())
@@ -398,7 +405,7 @@ Kirigami.ScrollablePage {
 
         function onIssueSaved(savedId) {
             if (editor.creating
-                    && editor.layerStack.currentItem === editor) {
+                    && editor.isCurrent) {
                 editor.issueId = savedId;
                 editor.creating = false;
                 editor.parentId = "";
@@ -408,7 +415,7 @@ Kirigami.ScrollablePage {
                 editor.requestDetail();
             } else if (savedId === editor.issueId) {
                 editor.closeRequested();
-            } else if (editor.layerStack.currentItem === editor) {
+            } else if (editor.isCurrent) {
                 editor.backend.loadIssue(editor.issueId);
             } else {
                 editor.refreshWhenCurrent = true;
@@ -416,15 +423,10 @@ Kirigami.ScrollablePage {
         }
     }
 
-    Connections {
-        target: editor.layerStack
-
-        function onCurrentItemChanged() {
-            if (editor.layerStack.currentItem === editor
-                    && editor.refreshWhenCurrent) {
-                editor.refreshWhenCurrent = false;
-                editor.requestDetail();
-            }
+    onIsCurrentChanged: {
+        if (isCurrent && refreshWhenCurrent) {
+            refreshWhenCurrent = false;
+            requestDetail();
         }
     }
 

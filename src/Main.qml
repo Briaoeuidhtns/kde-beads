@@ -4,6 +4,8 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtCore
+import QtQuick.Controls as Controls
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kquickcontrolsaddons as KQuickControlsAddons
 import knecklace
@@ -23,8 +25,12 @@ Kirigami.ApplicationWindow {
     property var knownProjects: []
     property bool projectsInitialized: false
     property bool sidebarCollapsedPreference: false
-    readonly property bool editorLayerOpen: Boolean(pageStack.layers.currentItem
-        && pageStack.layers.currentItem.objectName === "editorPage")
+    property var editorPages: []
+    property string pendingProjectPath: ""
+    readonly property bool editorLayerOpen: editorPages.length > 0
+    readonly property var activeEditorPage: editorLayerOpen
+        ? editorPages[editorPages.length - 1]
+        : null
 
     Settings {
         id: projectSettings
@@ -97,12 +103,23 @@ Kirigami.ApplicationWindow {
             persistProjects(Backend.workspace);
     }
 
-    function selectProject(path) {
-        if (editorLayerOpen || path === Backend.workspace)
+    function switchProject(path) {
+        if (path === Backend.workspace)
             return;
         Backend.switchWorkspace(path);
         if (projectSidebar.modal)
             projectSidebar.close();
+    }
+
+    function selectProject(path) {
+        if (path === Backend.workspace)
+            return;
+        if (editorLayerOpen) {
+            pendingProjectPath = path;
+            projectSwitchDialog.open();
+            return;
+        }
+        switchProject(path);
     }
 
     function initializeProjects() {
@@ -136,16 +153,76 @@ Kirigami.ApplicationWindow {
         attachmentClipboard.content = String(issueId || "");
     }
 
+    function registerEditor(editor) {
+        editorPages = editorPages.concat([editor]);
+    }
+
+    function unregisterEditor(editor) {
+        editorPages = editorPages.filter(candidate => candidate !== editor);
+    }
+
+    function activateEditor(editor) {
+        if (!editorPages.includes(editor))
+            return;
+        editorPages = editorPages
+            .filter(candidate => candidate !== editor)
+            .concat([editor]);
+    }
+
+    function editorForIssue(issueId) {
+        const id = String(issueId || "");
+        for (const editor of editorPages) {
+            if (!editor.creating && String(editor.issueId) === id)
+                return editor;
+        }
+        return null;
+    }
+
+    function raiseEditor(editor) {
+        activateEditor(editor);
+        const window = editor.Window.window;
+        if (!window)
+            return;
+        if (window.visibility === Window.Minimized)
+            window.showNormal();
+        else
+            window.show();
+        window.raise();
+        window.requestActivate();
+        window.attractAttention();
+    }
+
+    function closeEditorWindows() {
+        const editors = editorPages.slice();
+        for (const editor of editors) {
+            const window = editor.Window.window;
+            if (window)
+                window.close();
+        }
+    }
+
+    function confirmProjectSwitch() {
+        const path = pendingProjectPath;
+        pendingProjectPath = "";
+        closeEditorWindows();
+        switchProject(path);
+    }
+
     function openEditor(issueId) {
+        const existingEditor = editorForIssue(issueId);
+        if (existingEditor) {
+            raiseEditor(existingEditor);
+            return;
+        }
         if (Backend.loading)
             return;
-        pageStack.layers.push(editorPageComponent, { "issueId": issueId });
+        editorWindowComponent.createObject(root, { "issueId": issueId });
     }
 
     function openCreate(parentId) {
         if (Backend.loading)
             return;
-        pageStack.layers.push(editorPageComponent, {
+        editorWindowComponent.createObject(root, {
             "creating": true,
             "parentId": String(parentId || "")
         });
@@ -163,16 +240,103 @@ Kirigami.ApplicationWindow {
         function onWorkspaceChanged() {
             root.rememberProject(Backend.workspace);
         }
+
+        function onWorkspaceChosen(path) {
+            root.rememberProject(path);
+            root.selectProject(path);
+        }
+    }
+
+    Controls.ApplicationWindow {
+        id: projectSwitchDialog
+        objectName: "projectSwitchDialog"
+        readonly property real dialogWidth: Kirigami.Units.gridUnit * 30
+        readonly property real dialogHeight: Kirigami.Units.gridUnit * 9
+
+        width: dialogWidth
+        height: dialogHeight
+        minimumWidth: dialogWidth
+        maximumWidth: dialogWidth
+        minimumHeight: dialogHeight
+        maximumHeight: dialogHeight
+        visible: false
+        modality: Qt.ApplicationModal
+        flags: Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
+        transientParent: root
+        title: qsTr("Close issue windows?")
+        color: Kirigami.Theme.backgroundColor
+
+        function open() {
+            show();
+            raise();
+            requestActivate();
+            closeAndSwitchButton.forceActiveFocus();
+        }
+
+        function accept() {
+            root.confirmProjectSwitch();
+            close();
+        }
+
+        function reject() {
+            close();
+        }
+
+        onClosing: root.pendingProjectPath = ""
+
+        Shortcut {
+            sequence: "Escape"
+            onActivated: projectSwitchDialog.reject()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Kirigami.Units.largeSpacing * 2
+
+            Controls.Label {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                text: qsTr(
+                    "Knecklace must close %n open issue window(s) before switching to %1. Any unsaved changes will be lost.",
+                    "",
+                    root.editorPages.length
+                ).arg(root.pendingProjectPath)
+                wrapMode: Text.WordWrap
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            Controls.DialogButtonBox {
+                Layout.fillWidth: true
+
+                Controls.Button {
+                    text: qsTr("Cancel")
+                    Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.RejectRole
+                }
+
+                Controls.Button {
+                    id: closeAndSwitchButton
+                    text: qsTr("Close Windows and Switch")
+                    icon.name: "window-close"
+                    highlighted: true
+                    Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.AcceptRole
+                }
+
+                onAccepted: projectSwitchDialog.accept()
+                onRejected: projectSwitchDialog.reject()
+            }
+        }
     }
 
     Component {
-        id: editorPageComponent
+        id: editorWindowComponent
 
-        BeadEditorPage {
+        EditorWindow {
             backend: Backend
             clipboard: attachmentClipboard
-            layerStack: root.pageStack.layers
-            onCloseRequested: root.pageStack.layers.pop()
+            activeEditor: root.activeEditorPage
+            onEditorOpened: editor => root.registerEditor(editor)
+            onEditorClosed: editor => root.unregisterEditor(editor)
+            onEditorActivated: editor => root.activateEditor(editor)
             onCreateChildRequested: parentId => root.openCreate(parentId)
             onOpenIssueRequested: issueId => root.openEditor(issueId)
             onCopyIssueIdRequested: issueId => root.copyIssueId(issueId)
@@ -184,7 +348,6 @@ Kirigami.ApplicationWindow {
         projects: root.knownProjects
         currentWorkspace: Backend.workspace
         backendLoading: Backend.loading
-        editorOpen: root.editorLayerOpen
         windowWidth: root.width
         preferredCollapsed: root.sidebarCollapsedPreference
         onProjectSelected: path => root.selectProject(path)

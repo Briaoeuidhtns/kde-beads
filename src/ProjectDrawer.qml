@@ -14,7 +14,6 @@ Kirigami.GlobalDrawer {
     required property var projects
     required property string currentWorkspace
     required property bool backendLoading
-    required property bool editorOpen
     required property real windowWidth
     required property bool preferredCollapsed
     property bool stateInitialized: false
@@ -81,7 +80,6 @@ Kirigami.GlobalDrawer {
                     ? Controls.AbstractButton.IconOnly
                     : Controls.AbstractButton.TextBesideIcon
                 highlighted: modelData === projectSidebar.currentWorkspace
-                enabled: !projectSidebar.editorOpen
                 Accessible.description: modelData
                 Controls.ToolTip.text: modelData
                 Controls.ToolTip.visible: hovered
@@ -104,7 +102,7 @@ Kirigami.GlobalDrawer {
             display: projectSidebar.collapsed
                 ? Controls.AbstractButton.IconOnly
                 : Controls.AbstractButton.TextBesideIcon
-            enabled: !projectSidebar.backendLoading && !projectSidebar.editorOpen
+            enabled: !projectSidebar.backendLoading
             onClicked: projectSidebar.addProjectRequested()
         }
     }

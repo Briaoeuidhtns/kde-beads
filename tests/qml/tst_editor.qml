@@ -35,8 +35,11 @@ Item {
             };
         }
 
-        function createApp() {
-            app = createTemporaryObject(appComponent, testRoot, { "visible": true });
+        function createApp(properties) {
+            const initialProperties = Object.assign({
+                "visible": true
+            }, properties || {});
+            app = createTemporaryObject(appComponent, testRoot, initialProperties);
             verify(app, "application window should load");
             app.requestActivate();
             tryCompare(app, "active", true);
@@ -47,7 +50,9 @@ Item {
         function openCreateEditor() {
             app.openCreate();
             tryVerify(() => findChild(app, "editorPage") !== null);
-            return findChild(app, "editorPage");
+            const editor = findChild(app, "editorPage");
+            tryVerify(() => editor.Window.window.active);
+            return editor;
         }
 
         function init() {
@@ -173,7 +178,7 @@ Item {
             compare(editor.issueId, "test-created");
             compare(findChild(editor, "commentsSection").visible, true);
             compare(Backend.lastLoadedId, "test-created");
-            compare(app.pageStack.layers.currentItem, editor);
+            compare(editor.isCurrent, true);
         }
 
         function test_child_editor_submits_epic_parent() {
@@ -321,8 +326,13 @@ Item {
             tryCompare(Backend, "lastLoadedId", "test-parent");
             const parentEditor = findChild(app, "editorPage");
             compare(parentEditor.dependents.length, 1);
-            app.openEditor("test-child");
+            parentEditor.openIssueRequested("test-child");
             tryCompare(Backend, "lastLoadedId", "test-child");
+            const childEditor = app.activeEditorPage;
+            verify(childEditor !== parentEditor);
+            verify(childEditor.Window.window !== parentEditor.Window.window);
+            tryCompare(childEditor, "isCurrent", true);
+            tryCompare(parentEditor, "isCurrent", false);
             Backend.detail = {
                 "id": "test-child",
                 "title": "Child issue",
@@ -334,11 +344,35 @@ Item {
                 "dependents": []
             };
 
-            app.pageStack.layers.pop();
+            childEditor.closeRequested();
 
             compare(Backend.lastLoadedId, "test-child");
             compare(Backend.loadIssueCallCount, 2);
             compare(parentEditor.dependents.length, 1);
+            tryVerify(() => app.activeEditorPage === parentEditor);
+        }
+
+        function test_narrow_window_uses_editor_window() {
+            createApp({ "width": 800 });
+            const editor = openCreateEditor();
+
+            verify(editor.Window.window !== app);
+            compare(app.pageStack.layers.depth, 1);
+            compare(app.editorLayerOpen, true);
+        }
+
+        function test_wide_window_uses_editor_window() {
+            createApp({ "width": 1280 });
+            const editor = openCreateEditor();
+            const issueWindow = editor.Window.window;
+
+            verify(issueWindow);
+            verify(issueWindow !== app);
+            verify(issueWindow.width < app.width);
+            compare(issueWindow.modality, Qt.NonModal);
+            compare(app.pageStack.layers.depth, 1);
+            compare(app.editorLayerOpen, true);
+            compare(editor.isCurrent, true);
         }
 
         function test_escape_closes_editor() {
@@ -357,6 +391,39 @@ Item {
             tryCompare(Backend, "loadIssueCallCount", 1);
             compare(Backend.lastLoadedId, "test-existing");
             verify(findChild(app, "editorPage"));
+        }
+
+        function test_opening_an_open_issue_raises_its_existing_window() {
+            Backend.issues = [issue("test-single-window", "open")];
+            Backend.detail = {
+                "id": "test-single-window",
+                "title": "Single window issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-single-window");
+            tryVerify(() => app.editorPages.length === 1);
+            const editor = app.activeEditorPage;
+            const attentionAnimation = findChild(
+                editor.Window.window,
+                "attentionAnimation"
+            );
+            verify(attentionAnimation);
+            compare(attentionAnimation.loops, 1);
+
+            app.openEditor("test-single-window");
+
+            compare(app.editorPages.length, 1);
+            compare(app.activeEditorPage, editor);
+            compare(Backend.loadIssueCallCount, 1);
+            tryCompare(attentionAnimation, "running", true);
         }
 
         function test_existing_issue_id_can_be_copied() {

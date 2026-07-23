@@ -379,15 +379,59 @@ Item {
             tryCompare(sidebar, "drawerOpen", true);
         }
 
-        function test_project_switching_is_blocked_while_editing() {
+        function test_project_switching_can_be_cancelled_while_editing() {
             createApp([]);
             app.rememberProject("/tmp/another-project");
             app.openCreate();
             tryCompare(app, "editorLayerOpen", true);
+            const list = findChild(app, "projectList");
+            const dialog = findChild(app, "projectSwitchDialog");
+            const addButton = findChild(app, "addProjectButton");
 
+            compare(list.itemAt(1).enabled, true);
+            compare(addButton.enabled, true);
             app.selectProject("/tmp/another-project");
 
+            tryCompare(dialog, "visible", true);
+            compare(dialog.modality, Qt.ApplicationModal);
+            compare(dialog.transientParent, app);
+            compare(dialog.minimumWidth, dialog.maximumWidth);
+            compare(dialog.minimumHeight, dialog.maximumHeight);
             compare(Backend.switchWorkspaceCallCount, 0);
+            dialog.reject();
+            tryCompare(dialog, "visible", false);
+            compare(Backend.switchWorkspaceCallCount, 0);
+            compare(app.editorLayerOpen, true);
+            compare(Backend.workspace, "/tmp/knecklace-tests");
+        }
+
+        function test_project_switching_closes_editors_after_confirmation() {
+            createApp([]);
+            app.rememberProject("/tmp/another-project");
+            app.openCreate();
+            tryCompare(app, "editorLayerOpen", true);
+            const dialog = findChild(app, "projectSwitchDialog");
+
+            app.selectProject("/tmp/another-project");
+            tryCompare(dialog, "visible", true);
+            dialog.accept();
+
+            tryCompare(app, "editorLayerOpen", false);
+            compare(Backend.switchWorkspaceCallCount, 1);
+            compare(Backend.workspace, "/tmp/another-project");
+        }
+
+        function test_chosen_project_uses_editor_confirmation() {
+            createApp([]);
+            app.openCreate();
+            tryCompare(app, "editorLayerOpen", true);
+            const dialog = findChild(app, "projectSwitchDialog");
+
+            Backend.workspaceChosen("/tmp/chosen-project");
+
+            tryCompare(dialog, "visible", true);
+            compare(Backend.switchWorkspaceCallCount, 0);
+            verify(app.knownProjects.includes("/tmp/chosen-project"));
         }
 
         function test_project_paths_are_deduplicated() {

@@ -111,6 +111,9 @@ impl Backend {
     #[qsignal(qml_name = "issueSaved")]
     fn issue_saved(&mut self, id: &String);
 
+    #[qsignal(qml_name = "workspaceChosen")]
+    fn workspace_chosen(&mut self, path: &String);
+
     #[qsignal(qml_name = "attachmentReady")]
     fn attachment_ready(&mut self, issue_id: &String, path: &String);
 
@@ -966,7 +969,7 @@ impl Backend {
             return;
         }
         if !workspace.is_empty() && self.workspace == origin_workspace {
-            self.switch_workspace(workspace);
+            self.workspace_chosen(&workspace);
         }
     }
 

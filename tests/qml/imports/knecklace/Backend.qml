@@ -45,6 +45,7 @@ QtObject {
     property string lastSwitchedWorkspace: ""
 
     signal issueSaved(string savedId)
+    signal workspaceChosen(string path)
     signal attachmentReady(string issueId, string path)
     signal attachmentPreviewReady(string issueId, string attachmentId, string path)
 
