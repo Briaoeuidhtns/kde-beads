@@ -13,6 +13,12 @@ pub(crate) struct MutationResult {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct DeleteMutationResult {
+    pub(crate) issues: Option<Vec<Issue>>,
+    pub(crate) warning: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct IssueDetail {
     #[serde(flatten)]
     pub(crate) issue: Issue,
@@ -66,6 +72,28 @@ pub(crate) fn create_issue_and_list(
     issue: &NewIssue,
 ) -> Result<MutationResult, bd_client::Error> {
     mutate_and_list(workspace, |client| client.create(issue))
+}
+
+pub(crate) fn delete_issue_and_list(
+    workspace: String,
+    id: &str,
+) -> Result<DeleteMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    let outcome = client.delete(id)?;
+    let mut warnings = outcome.cleanup_warning.into_iter().collect::<Vec<_>>();
+    let issues = match client.list() {
+        Ok(issues) => Some(issues),
+        Err(error) => {
+            warnings.push(format!(
+                "Bead {id} was deleted, but the board could not be refreshed: {error}"
+            ));
+            None
+        }
+    };
+    Ok(DeleteMutationResult {
+        issues,
+        warning: warnings.join("\n"),
+    })
 }
 
 pub(crate) fn add_attachment_to_issue(

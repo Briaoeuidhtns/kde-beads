@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
-use bd_client::{Client, IssueUpdate, NewIssue, Status};
+use bd_client::{Client, Error, IssueUpdate, NewIssue, Status};
 use tempfile::TempDir;
 
 fn workspace() -> TempDir {
@@ -137,6 +137,40 @@ fn creates_lists_and_shows_an_issue() {
 }
 
 #[test]
+fn deletes_an_issue_and_its_polyfill_attachments() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let deleted = client
+        .create(&new_issue("Delete this issue", Status::Open))
+        .expect("create deleted issue");
+    let survivor = client
+        .create(&new_issue("Keep this issue", Status::Open))
+        .expect("create surviving issue");
+    let source = workspace.path().join("delete-me.txt");
+    fs::write(&source, b"attachment to delete").expect("write attachment source");
+    let attached = client
+        .add_attachment(&deleted.id, &source)
+        .expect("add polyfill attachment");
+    let attachment_dir = workspace
+        .path()
+        .join(format!(".beads/knecklace/attachments/{}", deleted.id));
+    assert_eq!(attached.polyfill_attachment_count, 1);
+    assert!(attachment_dir.exists());
+
+    let outcome = client.delete(&deleted.id).expect("delete issue");
+
+    assert!(outcome.cleanup_warning.is_none());
+    assert!(!attachment_dir.exists());
+    assert!(matches!(
+        client.show(&deleted.id),
+        Err(Error::Command { .. })
+    ));
+    let listed = client.list().expect("list after deletion");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, survivor.id);
+}
+
+#[test]
 fn creates_an_issue_with_a_non_default_status() {
     let workspace = workspace();
     let client = Client::new(workspace.path()).expect("create client");
@@ -216,6 +250,35 @@ fn lists_dependency_blocking_separately_from_stored_status() {
         .expect("find dependent");
     assert_eq!(listed_dependent.status, Status::Open);
     assert!(!listed_dependent.is_blocked);
+}
+
+#[test]
+fn force_delete_preserves_dependents_and_removes_relationships() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let blocker = client
+        .create(&new_issue("Delete blocker", Status::Open))
+        .expect("create blocker");
+    let dependent = client
+        .create(&new_issue("Keep dependent", Status::Open))
+        .expect("create dependent");
+    client
+        .add_dependency(&dependent.id, &blocker.id, "blocks")
+        .expect("add blocking dependency");
+
+    client.delete(&blocker.id).expect("force delete blocker");
+
+    assert_eq!(
+        client.show(&dependent.id).expect("show dependent").id,
+        dependent.id
+    );
+    assert!(
+        client
+            .dependencies(&dependent.id)
+            .expect("list dependencies")
+            .iter()
+            .all(|issue| issue.id != blocker.id)
+    );
 }
 
 #[test]

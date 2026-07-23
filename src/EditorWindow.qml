@@ -82,8 +82,55 @@ Kirigami.ApplicationWindow {
         selected: editorWindow.activeEditor === editor
         onCloseRequested: editorWindow.requestClose()
         onCreateChildRequested: parentId => editorWindow.createChildRequested(parentId)
+        onDeleteRequested: deleteIssueDialog.open()
+        onDeleted: editorWindow.discardAndClose()
         onOpenIssueRequested: issueId => editorWindow.openIssueRequested(issueId)
         onCopyIssueIdRequested: issueId => editorWindow.copyIssueIdRequested(issueId)
+    }
+
+    Controls.Dialog {
+        id: deleteIssueDialog
+        objectName: "deleteIssueDialog"
+        parent: Controls.Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(
+            Kirigami.Units.gridUnit * 30,
+            parent.width - Kirigami.Units.largeSpacing * 4
+        )
+        modal: true
+        focus: true
+        closePolicy: Controls.Popup.CloseOnEscape
+        title: qsTr("Delete %1?").arg(editor.issueId)
+
+        contentItem: Controls.Label {
+            objectName: "deleteIssueWarning"
+            text: qsTr(
+                "This permanently deletes the bead and removes its relationships. "
+                + "Unsaved changes in this window will be discarded. This cannot be undone."
+            )
+            wrapMode: Text.WordWrap
+        }
+
+        footer: Controls.DialogButtonBox {
+            Controls.Button {
+                objectName: "cancelDeleteButton"
+                text: qsTr("Cancel")
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.RejectRole
+            }
+            Controls.Button {
+                objectName: "confirmDeleteButton"
+                text: qsTr("Delete")
+                icon.name: "edit-delete"
+                enabled: !editor.backend.loading
+                Controls.DialogButtonBox.buttonRole: Controls.DialogButtonBox.DestructiveRole
+            }
+
+            onDiscarded: {
+                deleteIssueDialog.close();
+                editor.deleteIssue();
+            }
+            onRejected: deleteIssueDialog.close()
+        }
     }
 
     Controls.Dialog {

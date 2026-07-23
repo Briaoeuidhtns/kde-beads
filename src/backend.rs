@@ -14,10 +14,11 @@ use crate::editor_request::{
     attachment_paths_from_urls, issue_update_from_value, new_issue_from_value,
 };
 use crate::operations::{
-    DetailMutationResult, MutationResult, add_attachment_to_issue, add_attachments_to_issue,
-    add_comment_and_list, add_dependency_and_list, canonical_workspace, create_issue_and_list,
-    encode_result, list_issues, load_issue_detail, materialize_attachment, migrate_attachments,
-    move_issue_and_list, remove_attachment_from_issue, update_issue_and_list,
+    DeleteMutationResult, DetailMutationResult, MutationResult, add_attachment_to_issue,
+    add_attachments_to_issue, add_comment_and_list, add_dependency_and_list, canonical_workspace,
+    create_issue_and_list, delete_issue_and_list, encode_result, list_issues, load_issue_detail,
+    materialize_attachment, migrate_attachments, move_issue_and_list, remove_attachment_from_issue,
+    update_issue_and_list,
 };
 use crate::workspace_cache::WorkspaceCache;
 
@@ -110,6 +111,9 @@ impl Backend {
 
     #[qsignal(qml_name = "issueSaved")]
     fn issue_saved(&mut self, id: &String);
+
+    #[qsignal(qml_name = "issueDeleted")]
+    fn issue_deleted(&mut self, id: &String);
 
     #[qsignal(qml_name = "workspaceChosen")]
     fn workspace_chosen(&mut self, path: &String);
@@ -265,6 +269,33 @@ impl Backend {
                 error,
                 result_workspace,
                 generation
+            );
+        });
+    }
+
+    #[qslot]
+    fn delete_issue(&mut self, id: String) {
+        if id.is_empty() {
+            return;
+        }
+        let Some((workspace, generation)) = self.begin_foreground(true) else {
+            return;
+        };
+
+        let result_workspace = workspace.clone();
+        let deleted_id = id.clone();
+        let generation = generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let (payload, error) = encode_result(delete_issue_and_list(workspace, &id));
+            invoke_method!(
+                invoker,
+                "finishDeleteIssue",
+                payload,
+                error,
+                result_workspace,
+                generation,
+                deleted_id
             );
         });
     }
@@ -724,6 +755,77 @@ impl Backend {
         if let Some(created_id) = self.finish_mutation(payload, error, workspace, generation, true)
         {
             self.issue_saved(&created_id);
+        }
+    }
+
+    #[qslot(qml_name = "finishDeleteIssue")]
+    fn finish_delete_issue(
+        &mut self,
+        payload: String,
+        error: String,
+        workspace: String,
+        generation: String,
+        deleted_id: String,
+    ) {
+        let Some(generation) = parse_generation(&generation) else {
+            return;
+        };
+        if !self.cache.foreground_is_current(&workspace, generation) {
+            return;
+        }
+        if !error.is_empty() {
+            self.fail_foreground(&workspace, generation, error);
+            return;
+        }
+
+        let result = match serde_json::from_str::<DeleteMutationResult>(&payload) {
+            Ok(result) => result,
+            Err(error) => {
+                self.fail_foreground(
+                    &workspace,
+                    generation,
+                    format!("Could not decode deleted bead result: {error}"),
+                );
+                return;
+            }
+        };
+        let mut warning = result.warning;
+        let snapshot = result
+            .issues
+            .and_then(|issues| match issues_to_values(issues) {
+                Ok(issues) => Some(issues),
+                Err(error) => {
+                    if !warning.is_empty() {
+                        warning.push('\n');
+                    }
+                    warning.push_str(&format!(
+                        "Bead {deleted_id} was deleted, but the board could not be updated: {error}"
+                    ));
+                    None
+                }
+            });
+        let needs_refresh = snapshot.is_none();
+        if let Some(issues) = snapshot {
+            self.cache.apply_snapshot(&workspace, generation, issues);
+        }
+        if !warning.is_empty() {
+            self.cache.set_error(&workspace, generation, warning);
+        }
+        if self
+            .active_detail
+            .as_ref()
+            .is_some_and(|target| target.workspace == workspace && target.issue_id == deleted_id)
+        {
+            self.active_detail = None;
+            self.set_detail(json!({}));
+        }
+        let is_active = self.workspace == workspace;
+        self.complete_foreground(&workspace, generation);
+        if needs_refresh {
+            self.start_workspace_refresh(workspace.clone(), false);
+        }
+        if is_active {
+            self.issue_deleted(&deleted_id);
         }
     }
 

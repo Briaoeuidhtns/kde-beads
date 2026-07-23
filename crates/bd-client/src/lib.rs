@@ -186,6 +186,11 @@ pub struct NewIssue {
     pub parent: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct DeleteOutcome {
+    pub cleanup_warning: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Client {
     workspace: PathBuf,
@@ -357,6 +362,19 @@ impl Client {
         args.push("--json");
         let payload = self.run(false, &args)?;
         parse_single_issue("update", &payload)
+    }
+
+    pub fn delete(&self, id: &str) -> Result<DeleteOutcome, Error> {
+        self.run(false, &["delete", id, "--force", "--json"])?;
+        let cleanup_warning = self
+            .cleanup_deleted_polyfill_storage(id)
+            .err()
+            .map(|error| {
+                format!(
+                    "Bead {id} was deleted, but its local attachment files could not be removed: {error}"
+                )
+            });
+        Ok(DeleteOutcome { cleanup_warning })
     }
 
     pub fn add_dependency(

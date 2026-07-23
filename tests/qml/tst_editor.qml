@@ -75,10 +75,12 @@ Item {
             const statusField = findChild(editor, "statusField");
             const typeField = findChild(editor, "typeField");
             const saveButton = findChild(editor, "bottomSaveButton");
+            const deleteAction = findChild(editor, "deleteIssueAction");
             compare(editor.title, "Create bead");
             compare(titleField.placeholderText, "Bead title");
             compare(editor.dirty, false);
             compare(saveButton.text, "Create");
+            compare(deleteAction.visible, false);
             titleField.text = "Test-created issue";
             findChild(editor, "descriptionField").text = "Created in Qt Quick Test";
             findChild(editor, "labelsField").text = "qml, kde";
@@ -567,6 +569,56 @@ Item {
             tryCompare(Backend, "loadIssueCallCount", 1);
             compare(Backend.lastLoadedId, "test-existing");
             verify(findChild(app, "editorPage"));
+        }
+
+        function test_existing_editor_confirms_permanent_delete() {
+            Backend.issues = [issue("test-delete", "open")];
+            Backend.detail = {
+                "id": "test-delete",
+                "title": "Delete this bead",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-delete");
+            const editor = findChild(app, "editorPage");
+            const issueWindow = editor.Window.window;
+            const deleteAction = findChild(editor, "deleteIssueAction");
+            const dialog = findChild(issueWindow, "deleteIssueDialog");
+            const warning = findChild(issueWindow, "deleteIssueWarning");
+            const cancelButton = findChild(issueWindow, "cancelDeleteButton");
+            const confirmButton = findChild(issueWindow, "confirmDeleteButton");
+            const unsavedDialog = findChild(issueWindow, "unsavedChangesDialog");
+            editor.detailReady = true;
+            findChild(editor, "titleField").text = "Dirty title";
+
+            compare(deleteAction.visible, true);
+            deleteAction.triggered();
+            tryCompare(dialog, "opened", true);
+            verify(warning.text.includes("cannot be undone"));
+            compare(Backend.deleteIssueCallCount, 0);
+
+            cancelButton.clicked();
+            tryCompare(dialog, "opened", false);
+            compare(Backend.deleteIssueCallCount, 0);
+
+            deleteAction.triggered();
+            tryCompare(dialog, "opened", true);
+            confirmButton.clicked();
+
+            compare(Backend.deleteIssueCallCount, 1);
+            compare(Backend.lastDeletedId, "test-delete");
+            compare(issueWindow.visible, true);
+            compare(unsavedDialog.opened, false);
+            Backend.issueDeleted("test-delete");
+
+            tryVerify(() => findChild(app, "editorPage") === null);
         }
 
         function test_opening_an_open_issue_raises_its_existing_window() {

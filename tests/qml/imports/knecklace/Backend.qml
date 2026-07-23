@@ -19,6 +19,7 @@ QtObject {
     property int moveIssueCallCount: 0
     property int saveIssueCallCount: 0
     property int createIssueCallCount: 0
+    property int deleteIssueCallCount: 0
     property int addDependencyCallCount: 0
     property int addCommentCallCount: 0
     property int addAttachmentCallCount: 0
@@ -34,6 +35,7 @@ QtObject {
     property string lastMovedStatus: ""
     property var lastSavedRequest: ({})
     property var lastCreatedRequest: ({})
+    property string lastDeletedId: ""
     property string lastDependencyIssueId: ""
     property string lastDependsOnId: ""
     property string lastDependencyType: ""
@@ -45,6 +47,7 @@ QtObject {
     property string lastSwitchedWorkspace: ""
 
     signal issueSaved(string savedId)
+    signal issueDeleted(string deletedId)
     signal workspaceChosen(string path)
     signal attachmentReady(string issueId, string path)
     signal attachmentPreviewReady(string issueId, string attachmentId, string path)
@@ -63,6 +66,7 @@ QtObject {
         moveIssueCallCount = 0;
         saveIssueCallCount = 0;
         createIssueCallCount = 0;
+        deleteIssueCallCount = 0;
         addDependencyCallCount = 0;
         addCommentCallCount = 0;
         addAttachmentCallCount = 0;
@@ -78,6 +82,7 @@ QtObject {
         lastMovedStatus = "";
         lastSavedRequest = {};
         lastCreatedRequest = {};
+        lastDeletedId = "";
         lastDependencyIssueId = "";
         lastDependsOnId = "";
         lastDependencyType = "";
@@ -116,6 +121,11 @@ QtObject {
     function createIssue(request) {
         createIssueCallCount += 1;
         lastCreatedRequest = request;
+    }
+
+    function deleteIssue(issueId) {
+        deleteIssueCallCount += 1;
+        lastDeletedId = issueId;
     }
 
     function addDependency(issueId, dependsOnId, dependencyType) {

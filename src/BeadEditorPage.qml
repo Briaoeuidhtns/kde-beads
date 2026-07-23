@@ -19,6 +19,8 @@ Kirigami.ScrollablePage {
 
     signal closeRequested()
     signal createChildRequested(string parentId)
+    signal deleteRequested()
+    signal deleted()
     signal openIssueRequested(string issueId)
     signal copyIssueIdRequested(string issueId)
 
@@ -335,6 +337,14 @@ Kirigami.ScrollablePage {
         return true;
     }
 
+    function deleteIssue() {
+        if (!persisted || backend.loading)
+            return false;
+        preserveFieldsWhileLoading = true;
+        backend.deleteIssue(issueId);
+        return true;
+    }
+
     actions: [
         Kirigami.Action {
             text: editor.creating ? qsTr("Create") : qsTr("Save")
@@ -350,6 +360,14 @@ Kirigami.ScrollablePage {
             visible: !editor.creating && typeField.currentValue === "epic"
             enabled: !editor.backend.loading
             onTriggered: editor.createChildRequested(editor.issueId)
+        },
+        Kirigami.Action {
+            objectName: "deleteIssueAction"
+            text: qsTr("Delete bead")
+            icon.name: "edit-delete"
+            visible: editor.persisted
+            enabled: editor.detailReady && !editor.backend.loading
+            onTriggered: editor.deleteRequested()
         }
     ]
 
@@ -446,6 +464,16 @@ Kirigami.ScrollablePage {
                 editor.closeRequested();
             } else if (editor.isCurrent) {
                 editor.backend.loadIssue(editor.issueId);
+            } else {
+                editor.refreshWhenCurrent = true;
+            }
+        }
+
+        function onIssueDeleted(deletedId) {
+            if (deletedId === editor.issueId) {
+                editor.deleted();
+            } else if (editor.isCurrent) {
+                editor.requestDetail();
             } else {
                 editor.refreshWhenCurrent = true;
             }

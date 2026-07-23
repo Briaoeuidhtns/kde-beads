@@ -217,6 +217,47 @@ impl Client {
         self.show(issue_id)
     }
 
+    pub(super) fn cleanup_deleted_polyfill_storage(&self, issue_id: &str) -> Result<(), Error> {
+        validate_component(issue_id, "bead ID")?;
+        let _lock = self.acquire_polyfill_lock()?;
+        let issue_dir = self.polyfill_issue_dir(issue_id, false)?;
+        let entries = match fs::read_dir(&issue_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(attachment_io_error(
+                    "read deleted bead attachment directory",
+                    &issue_dir,
+                    error,
+                ));
+            }
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                attachment_io_error("read deleted bead attachment directory", &issue_dir, error)
+            })?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| attachment_io_error("inspect attachment", &path, error))?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(Error::Attachment(format!(
+                    "deleted bead attachment storage contains an unsafe entry: {}",
+                    path.display()
+                )));
+            }
+            fs::remove_file(&path)
+                .map_err(|error| attachment_io_error("remove attachment", &path, error))?;
+        }
+        fs::remove_dir(&issue_dir).map_err(|error| {
+            attachment_io_error(
+                "remove deleted bead attachment directory",
+                &issue_dir,
+                error,
+            )
+        })?;
+        Ok(())
+    }
+
     pub(crate) fn hydrate_attachments(&self, issue: &mut Issue) -> Result<(), Error> {
         let native_supported = self.supports_native_attachments()?;
         let attachments = self.attachments_for_issue(issue, native_supported)?;
