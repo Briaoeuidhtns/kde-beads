@@ -18,7 +18,7 @@ use crate::operations::{
     add_attachments_to_issue, add_comment_and_list, add_dependency_and_list, canonical_workspace,
     create_issue_and_list, delete_issue_and_list, encode_result, list_issues, load_issue_detail,
     materialize_attachment, migrate_attachments, move_issue_and_list, remove_attachment_from_issue,
-    update_issue_and_list,
+    remove_dependency_and_list, update_issue_and_list,
 };
 use crate::workspace_cache::WorkspaceCache;
 
@@ -508,10 +508,17 @@ impl Backend {
     }
 
     #[qslot]
-    fn add_dependency(&mut self, issue_id: String, depends_on_id: String, dependency_type: String) {
+    fn add_dependency(
+        &mut self,
+        issue_id: String,
+        depends_on_id: String,
+        dependency_type: String,
+        detail_issue_id: String,
+    ) {
         let issue_id = issue_id.trim().to_string();
         let depends_on_id = depends_on_id.trim().to_string();
-        if issue_id.is_empty() || depends_on_id.is_empty() {
+        let detail_issue_id = detail_issue_id.trim().to_string();
+        if issue_id.is_empty() || depends_on_id.is_empty() || detail_issue_id.is_empty() {
             self.set_error("Both relationship bead IDs are required".to_string());
             return;
         }
@@ -528,16 +535,59 @@ impl Backend {
         };
 
         let result_workspace = workspace.clone();
-        let result_issue_id = issue_id.clone();
+        let result_issue_id = detail_issue_id.clone();
         let generation = generation.to_string();
         let invoker = self.get_qml_method_invoker();
         thread::spawn(move || {
-            let result =
-                add_dependency_and_list(workspace, &issue_id, &depends_on_id, &dependency_type);
+            let result = add_dependency_and_list(
+                workspace,
+                &issue_id,
+                &depends_on_id,
+                &dependency_type,
+                &detail_issue_id,
+            );
             let (payload, error) = encode_result(result);
             invoke_method!(
                 invoker,
                 "finishAddDependency",
+                payload,
+                error,
+                result_workspace,
+                generation,
+                result_issue_id
+            );
+        });
+    }
+
+    #[qslot]
+    fn remove_dependency(
+        &mut self,
+        issue_id: String,
+        depends_on_id: String,
+        detail_issue_id: String,
+    ) {
+        let issue_id = issue_id.trim().to_string();
+        let depends_on_id = depends_on_id.trim().to_string();
+        let detail_issue_id = detail_issue_id.trim().to_string();
+        if issue_id.is_empty() || depends_on_id.is_empty() || detail_issue_id.is_empty() {
+            self.set_error("Both relationship bead IDs are required".to_string());
+            return;
+        }
+        let Some((workspace, generation)) = self.begin_foreground(true) else {
+            return;
+        };
+
+        let result_workspace = workspace.clone();
+        let result_issue_id = detail_issue_id.clone();
+        let generation = generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result =
+                remove_dependency_and_list(workspace, &issue_id, &depends_on_id, &detail_issue_id);
+            let (payload, error) = encode_result(result);
+            invoke_method!(
+                invoker,
+                "finishRemoveDependency",
                 payload,
                 error,
                 result_workspace,
@@ -964,6 +1014,25 @@ impl Backend {
 
     #[qslot(qml_name = "finishAddDependency")]
     fn finish_add_dependency(
+        &mut self,
+        payload: String,
+        error: String,
+        workspace: String,
+        generation: String,
+        issue_id: String,
+    ) {
+        self.finish_detail_mutation(
+            payload,
+            error,
+            workspace,
+            generation,
+            issue_id,
+            "relationships",
+        );
+    }
+
+    #[qslot(qml_name = "finishRemoveDependency")]
+    fn finish_remove_dependency(
         &mut self,
         payload: String,
         error: String,

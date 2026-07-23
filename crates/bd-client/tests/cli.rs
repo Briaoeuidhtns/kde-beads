@@ -403,6 +403,17 @@ fn creates_child_and_blocking_relationships() {
             .iter()
             .any(|issue| issue.id == child.id && issue.dependency_type == "parent-child")
     );
+
+    client
+        .remove_dependency(&child.id, &blocker.id)
+        .expect("remove blocking dependency");
+    assert!(
+        client
+            .dependencies(&child.id)
+            .expect("list dependencies after removal")
+            .iter()
+            .all(|issue| issue.id != blocker.id)
+    );
 }
 
 #[test]

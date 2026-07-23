@@ -301,9 +301,23 @@ Kirigami.ScrollablePage {
         editor.backend.addDependency(
             reverse ? targetId : issueId,
             reverse ? issueId : targetId,
-            dependencyType
+            dependencyType,
+            issueId
         );
         relationshipTargetField.clear();
+    }
+
+    function removeRelationship(relationship, incoming) {
+        const relatedId = String(relationship.id || "");
+        if (relatedId.length === 0 || backend.loading)
+            return false;
+        preserveFieldsWhileLoading = true;
+        backend.removeDependency(
+            incoming ? relatedId : issueId,
+            incoming ? issueId : relatedId,
+            issueId
+        );
+        return true;
     }
 
     function formatCommentDate(value) {
@@ -905,28 +919,56 @@ Kirigami.ScrollablePage {
                 Repeater {
                     model: editor.dependencies
 
-                    delegate: Controls.ItemDelegate {
+                    delegate: RowLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        icon.name: modelData.dependency_type === "parent-child"
-                            ? "view-list-tree"
-                            : "link"
-                        text: `${editor.relationshipLabel(modelData, false)}  ${modelData.id}  ${modelData.title || ""}`
-                        onClicked: editor.openIssueRequested(String(modelData.id))
+
+                        Controls.ItemDelegate {
+                            Layout.fillWidth: true
+                            icon.name: modelData.dependency_type === "parent-child"
+                                ? "view-list-tree"
+                                : "link"
+                            text: `${editor.relationshipLabel(modelData, false)}  ${modelData.id}  ${modelData.title || ""}`
+                            onClicked: editor.openIssueRequested(String(modelData.id))
+                        }
+                        Controls.ToolButton {
+                            objectName: `removeDependency-${modelData.id}`
+                            text: qsTr("Remove relationship with %1").arg(modelData.id)
+                            icon.name: "edit-delete"
+                            display: Controls.AbstractButton.IconOnly
+                            enabled: !editor.backend.loading
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: editor.removeRelationship(modelData, false)
+                        }
                     }
                 }
 
                 Repeater {
                     model: editor.dependents
 
-                    delegate: Controls.ItemDelegate {
+                    delegate: RowLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        icon.name: modelData.dependency_type === "parent-child"
-                            ? "view-list-tree"
-                            : "link"
-                        text: `${editor.relationshipLabel(modelData, true)}  ${modelData.id}  ${modelData.title || ""}`
-                        onClicked: editor.openIssueRequested(String(modelData.id))
+
+                        Controls.ItemDelegate {
+                            Layout.fillWidth: true
+                            icon.name: modelData.dependency_type === "parent-child"
+                                ? "view-list-tree"
+                                : "link"
+                            text: `${editor.relationshipLabel(modelData, true)}  ${modelData.id}  ${modelData.title || ""}`
+                            onClicked: editor.openIssueRequested(String(modelData.id))
+                        }
+                        Controls.ToolButton {
+                            objectName: `removeDependent-${modelData.id}`
+                            text: qsTr("Remove relationship with %1").arg(modelData.id)
+                            icon.name: "edit-delete"
+                            display: Controls.AbstractButton.IconOnly
+                            enabled: !editor.backend.loading
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: editor.removeRelationship(modelData, true)
+                        }
                     }
                 }
 

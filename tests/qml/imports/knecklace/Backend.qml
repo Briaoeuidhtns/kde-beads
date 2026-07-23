@@ -21,6 +21,7 @@ QtObject {
     property int createIssueCallCount: 0
     property int deleteIssueCallCount: 0
     property int addDependencyCallCount: 0
+    property int removeDependencyCallCount: 0
     property int addCommentCallCount: 0
     property int addAttachmentCallCount: 0
     property int addAttachmentsCallCount: 0
@@ -39,6 +40,7 @@ QtObject {
     property string lastDependencyIssueId: ""
     property string lastDependsOnId: ""
     property string lastDependencyType: ""
+    property string lastDependencyDetailId: ""
     property string lastCommentIssueId: ""
     property string lastCommentText: ""
     property string lastAttachmentIssueId: ""
@@ -68,6 +70,7 @@ QtObject {
         createIssueCallCount = 0;
         deleteIssueCallCount = 0;
         addDependencyCallCount = 0;
+        removeDependencyCallCount = 0;
         addCommentCallCount = 0;
         addAttachmentCallCount = 0;
         addAttachmentsCallCount = 0;
@@ -86,6 +89,7 @@ QtObject {
         lastDependencyIssueId = "";
         lastDependsOnId = "";
         lastDependencyType = "";
+        lastDependencyDetailId = "";
         lastCommentIssueId = "";
         lastCommentText = "";
         lastAttachmentIssueId = "";
@@ -128,11 +132,19 @@ QtObject {
         lastDeletedId = issueId;
     }
 
-    function addDependency(issueId, dependsOnId, dependencyType) {
+    function addDependency(issueId, dependsOnId, dependencyType, detailIssueId) {
         addDependencyCallCount += 1;
         lastDependencyIssueId = issueId;
         lastDependsOnId = dependsOnId;
         lastDependencyType = dependencyType;
+        lastDependencyDetailId = detailIssueId;
+    }
+
+    function removeDependency(issueId, dependsOnId, detailIssueId) {
+        removeDependencyCallCount += 1;
+        lastDependencyIssueId = issueId;
+        lastDependsOnId = dependsOnId;
+        lastDependencyDetailId = detailIssueId;
     }
 
     function addComment(issueId, text) {

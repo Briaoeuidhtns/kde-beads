@@ -340,6 +340,7 @@ Item {
             compare(Backend.lastDependencyIssueId, "test-existing");
             compare(Backend.lastDependsOnId, "test-blocker");
             compare(Backend.lastDependencyType, "blocks");
+            compare(Backend.lastDependencyDetailId, "test-existing");
 
             typeField.currentIndex = 1;
             targetField.text = "test-blocker";
@@ -348,6 +349,7 @@ Item {
             compare(Backend.lastDependencyIssueId, "test-blocker");
             compare(Backend.lastDependsOnId, "test-existing");
             compare(Backend.lastDependencyType, "blocks");
+            compare(Backend.lastDependencyDetailId, "test-existing");
 
             typeField.currentIndex = 2;
             targetField.text = "test-blocker";
@@ -356,6 +358,7 @@ Item {
             compare(Backend.lastDependencyIssueId, "test-existing");
             compare(Backend.lastDependsOnId, "test-blocker");
             compare(Backend.lastDependencyType, "parent-child");
+            compare(Backend.lastDependencyDetailId, "test-existing");
 
             typeField.currentIndex = 3;
             targetField.text = "test-blocker";
@@ -364,6 +367,55 @@ Item {
             compare(Backend.lastDependencyIssueId, "test-blocker");
             compare(Backend.lastDependsOnId, "test-existing");
             compare(Backend.lastDependencyType, "parent-child");
+            compare(Backend.lastDependencyDetailId, "test-existing");
+        }
+
+        function test_existing_issue_removes_relationships_in_either_direction() {
+            Backend.issues = [
+                issue("test-existing", "open"),
+                issue("test-blocker", "open"),
+                issue("test-child", "open")
+            ];
+            Backend.detail = {
+                "id": "test-existing",
+                "title": "Existing issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "epic",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [{
+                    "id": "test-blocker",
+                    "title": "Blocking bead",
+                    "dependency_type": "blocks"
+                }],
+                "dependents": [{
+                    "id": "test-child",
+                    "title": "Child bead",
+                    "dependency_type": "parent-child"
+                }],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-existing");
+            const editor = findChild(app, "editorPage");
+            editor.detailReady = true;
+            const removeDependency = findChild(editor, "removeDependency-test-blocker");
+            const removeDependent = findChild(editor, "removeDependent-test-child");
+
+            verify(removeDependency);
+            verify(removeDependent);
+            removeDependency.clicked();
+            compare(Backend.removeDependencyCallCount, 1);
+            compare(Backend.lastDependencyIssueId, "test-existing");
+            compare(Backend.lastDependsOnId, "test-blocker");
+            compare(Backend.lastDependencyDetailId, "test-existing");
+
+            removeDependent.clicked();
+            compare(Backend.removeDependencyCallCount, 2);
+            compare(Backend.lastDependencyIssueId, "test-child");
+            compare(Backend.lastDependsOnId, "test-existing");
+            compare(Backend.lastDependencyDetailId, "test-existing");
         }
 
         function test_existing_issue_displays_and_submits_comments() {

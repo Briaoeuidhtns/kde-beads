@@ -124,10 +124,24 @@ pub(crate) fn add_dependency_and_list(
     issue_id: &str,
     depends_on_id: &str,
     dependency_type: &str,
+    detail_issue_id: &str,
 ) -> Result<DetailMutationResult, bd_client::Error> {
     let client = Client::new(workspace)?;
     client.add_dependency(issue_id, depends_on_id, dependency_type)?;
-    let detail = load_issue_detail_with_client(&client, issue_id)?;
+    let detail = load_issue_detail_with_client(&client, detail_issue_id)?;
+    let issues = client.list()?;
+    Ok(DetailMutationResult { detail, issues })
+}
+
+pub(crate) fn remove_dependency_and_list(
+    workspace: String,
+    issue_id: &str,
+    depends_on_id: &str,
+    detail_issue_id: &str,
+) -> Result<DetailMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    client.remove_dependency(issue_id, depends_on_id)?;
+    let detail = load_issue_detail_with_client(&client, detail_issue_id)?;
     let issues = client.list()?;
     Ok(DetailMutationResult { detail, issues })
 }

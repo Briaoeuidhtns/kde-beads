@@ -398,6 +398,11 @@ impl Client {
         Ok(())
     }
 
+    pub fn remove_dependency(&self, issue_id: &str, depends_on_id: &str) -> Result<(), Error> {
+        self.run(false, &["dep", "remove", issue_id, depends_on_id, "--json"])?;
+        Ok(())
+    }
+
     pub fn add_comment(&self, issue_id: &str, text: &str) -> Result<Comment, Error> {
         let payload = self.run(false, &["comments", "add", issue_id, text, "--json"])?;
         serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
