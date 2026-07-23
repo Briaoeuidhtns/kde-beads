@@ -16,9 +16,12 @@ Kirigami.GlobalDrawer {
     required property bool backendLoading
     required property bool editorOpen
     required property real windowWidth
+    required property bool preferredCollapsed
+    property bool stateInitialized: false
 
     signal projectSelected(string path)
     signal addProjectRequested()
+    signal collapsedPreferenceChanged(bool collapsed)
 
     title: qsTr("Projects")
     titleIcon: "folder"
@@ -38,14 +41,24 @@ Kirigami.GlobalDrawer {
     }
 
     Component.onCompleted: {
+        collapsed = !modal && preferredCollapsed;
         collapsible = !modal;
         drawerOpen = !modal;
+        stateInitialized = true;
     }
     onModalChanged: Qt.callLater(() => {
-        collapsed = false;
+        collapsed = !modal && preferredCollapsed;
         collapsible = !modal;
         drawerOpen = !modal;
     })
+    onPreferredCollapsedChanged: {
+        if (stateInitialized && !modal)
+            collapsed = preferredCollapsed;
+    }
+    onCollapsedChanged: {
+        if (stateInitialized && !modal && collapsed !== preferredCollapsed)
+            collapsedPreferenceChanged(collapsed);
+    }
 
     ColumnLayout {
         Layout.fillWidth: true

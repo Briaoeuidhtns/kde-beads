@@ -38,9 +38,11 @@ Item {
             };
         }
 
-        function createApp(issues) {
+        function createApp(issues, properties) {
             Backend.issues = issues;
-            app = createTemporaryObject(appComponent, testRoot, { "visible": true });
+            const initialProperties = properties || {};
+            initialProperties.visible = true;
+            app = createTemporaryObject(appComponent, testRoot, initialProperties);
             verify(app, "application window should load");
             app.requestActivate();
             tryCompare(app, "active", true);
@@ -350,11 +352,31 @@ Item {
             sidebar.collapsed = true;
 
             tryCompare(sidebar, "collapsed", true);
+            compare(app.sidebarCollapsedPreference, true);
             tryVerify(() => sidebar.implicitWidth < expandedWidth);
             compare(
                 list.itemAt(0).display,
                 Controls.AbstractButton.IconOnly
             );
+        }
+
+        function test_project_sidebar_restores_saved_state_outside_narrow_mode() {
+            createApp([], { "sidebarCollapsedPreference": true });
+            const sidebar = findChild(app, "projectSidebar");
+
+            tryCompare(sidebar, "collapsed", true);
+
+            app.width = app.minimumWidth;
+
+            tryCompare(sidebar, "modal", true);
+            tryCompare(sidebar, "collapsed", false);
+            tryCompare(sidebar, "drawerOpen", false);
+
+            app.width = 1280;
+
+            tryCompare(sidebar, "modal", false);
+            tryCompare(sidebar, "collapsed", true);
+            tryCompare(sidebar, "drawerOpen", true);
         }
 
         function test_project_switching_is_blocked_while_editing() {

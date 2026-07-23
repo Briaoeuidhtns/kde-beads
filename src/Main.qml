@@ -22,6 +22,7 @@ Kirigami.ApplicationWindow {
     property bool projectPersistenceEnabled: true
     property var knownProjects: []
     property bool projectsInitialized: false
+    property bool sidebarCollapsedPreference: false
     readonly property bool editorLayerOpen: Boolean(pageStack.layers.currentItem
         && pageStack.layers.currentItem.objectName === "editorPage")
 
@@ -32,6 +33,7 @@ Kirigami.ApplicationWindow {
             + "/projects.ini"
         property string knownProjectsJson: ""
         property string activeProject: ""
+        property bool sidebarCollapsed: false
     }
 
     Timer {
@@ -76,6 +78,14 @@ Kirigami.ApplicationWindow {
             "paths": knownProjects
         });
         projectSettings.activeProject = String(activeProject || "");
+        projectSettings.sync();
+    }
+
+    function rememberSidebarCollapsed(collapsed) {
+        sidebarCollapsedPreference = collapsed;
+        if (!projectPersistenceEnabled)
+            return;
+        projectSettings.sidebarCollapsed = collapsed;
         projectSettings.sync();
     }
 
@@ -141,7 +151,11 @@ Kirigami.ApplicationWindow {
         });
     }
 
-    Component.onCompleted: initializeProjects()
+    Component.onCompleted: {
+        if (projectPersistenceEnabled)
+            sidebarCollapsedPreference = projectSettings.sidebarCollapsed;
+        initializeProjects();
+    }
 
     Connections {
         target: Backend
@@ -172,8 +186,10 @@ Kirigami.ApplicationWindow {
         backendLoading: Backend.loading
         editorOpen: root.editorLayerOpen
         windowWidth: root.width
+        preferredCollapsed: root.sidebarCollapsedPreference
         onProjectSelected: path => root.selectProject(path)
         onAddProjectRequested: Backend.chooseWorkspace()
+        onCollapsedPreferenceChanged: collapsed => root.rememberSidebarCollapsed(collapsed)
     }
 
     pageStack.initialPage: BoardPage {
