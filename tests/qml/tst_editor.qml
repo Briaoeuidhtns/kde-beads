@@ -126,6 +126,41 @@ Item {
             compare(Backend.lastSavedRequest.issueType, "incident");
         }
 
+        function test_existing_editor_disables_form_until_detail_loads() {
+            Backend.issues = [issue("test-loading", "open")];
+            createApp();
+            app.openEditor("test-loading");
+            const editor = findChild(app, "editorPage");
+            const form = findChild(editor, "editorForm");
+            const titleField = findChild(editor, "titleField");
+
+            compare(editor.detailLoadRequested, true);
+            compare(form.enabled, false);
+            compare(titleField.enabled, false);
+
+            Backend.loading = true;
+            Backend.detail = {
+                "id": "test-loading",
+                "title": "Loaded bead",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            compare(form.enabled, false);
+
+            Backend.loading = false;
+
+            compare(editor.detailReady, true);
+            compare(form.enabled, true);
+            compare(titleField.enabled, true);
+            compare(titleField.text, "Loaded bead");
+        }
+
         function test_legacy_blocked_status_is_preserved_on_save() {
             Backend.issues = [issue("test-legacy-blocked", "blocked")];
             Backend.detail = {

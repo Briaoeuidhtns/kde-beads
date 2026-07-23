@@ -533,8 +533,9 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.FormLayout {
+            objectName: "editorForm"
             Layout.fillWidth: true
-            enabled: !editor.backend.loading || editor.detailLoadRequested
+            enabled: !editor.backend.loading && (editor.creating || editor.detailReady)
 
             Controls.TextField {
                 id: titleField
