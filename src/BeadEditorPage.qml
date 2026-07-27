@@ -1433,70 +1433,118 @@ Kirigami.ScrollablePage {
             }
 
             Controls.ScrollView {
+                id: descriptionScroll
                 Kirigami.FormData.label: qsTr("Description:")
                 Kirigami.FormData.labelAlignment: Qt.AlignTop
                 implicitWidth: editor.formFieldWidth
                 implicitHeight: Kirigami.Units.gridUnit * 8
                 Layout.fillWidth: true
+                Controls.ScrollBar.horizontal.policy: Controls.ScrollBar.AlwaysOff
 
-                Controls.TextArea {
-                    id: descriptionField
-                    objectName: "descriptionField"
-                    wrapMode: TextEdit.Wrap
-                    placeholderText: qsTr("Describe the work")
-                    Keys.priority: Keys.BeforeItem
-                    Keys.onPressed: event => editor.handlePasteEvent(event)
+                Flickable {
+                    id: descriptionFlickable
+                    objectName: "descriptionFlickable"
+                    clip: true
+                    contentWidth: width
+                    contentHeight: descriptionField.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    interactive: contentHeight > height
+
+                    Components.MarkdownField {
+                        id: descriptionField
+                        objectName: "descriptionField"
+                        width: parent.width
+                        height: Math.max(descriptionScroll.availableHeight, implicitHeight)
+                        placeholderText: qsTr("Describe the work")
+                        onKeyPressed: event => editor.handlePasteEvent(event)
+                    }
                 }
             }
 
             Controls.ScrollView {
+                id: acceptanceScroll
                 Kirigami.FormData.label: qsTr("Acceptance:")
                 Kirigami.FormData.labelAlignment: Qt.AlignTop
                 implicitWidth: editor.formFieldWidth
                 implicitHeight: Kirigami.Units.gridUnit * 6
                 Layout.fillWidth: true
+                Controls.ScrollBar.horizontal.policy: Controls.ScrollBar.AlwaysOff
 
-                Controls.TextArea {
-                    id: acceptanceField
-                    objectName: "acceptanceField"
-                    wrapMode: TextEdit.Wrap
-                    placeholderText: qsTr("Acceptance criteria")
-                    Keys.priority: Keys.BeforeItem
-                    Keys.onPressed: event => editor.handlePasteEvent(event)
+                Flickable {
+                    id: acceptanceFlickable
+                    objectName: "acceptanceFlickable"
+                    clip: true
+                    contentWidth: width
+                    contentHeight: acceptanceField.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    interactive: contentHeight > height
+
+                    Components.MarkdownField {
+                        id: acceptanceField
+                        objectName: "acceptanceField"
+                        width: parent.width
+                        height: Math.max(acceptanceScroll.availableHeight, implicitHeight)
+                        placeholderText: qsTr("Acceptance criteria")
+                        onKeyPressed: event => editor.handlePasteEvent(event)
+                    }
                 }
             }
 
             Controls.ScrollView {
+                id: designScroll
                 Kirigami.FormData.label: qsTr("Design:")
                 Kirigami.FormData.labelAlignment: Qt.AlignTop
                 implicitWidth: editor.formFieldWidth
                 implicitHeight: Kirigami.Units.gridUnit * 6
                 Layout.fillWidth: true
+                Controls.ScrollBar.horizontal.policy: Controls.ScrollBar.AlwaysOff
 
-                Controls.TextArea {
-                    id: designField
-                    objectName: "designField"
-                    wrapMode: TextEdit.Wrap
-                    placeholderText: qsTr("Implementation notes")
-                    Keys.priority: Keys.BeforeItem
-                    Keys.onPressed: event => editor.handlePasteEvent(event)
+                Flickable {
+                    id: designFlickable
+                    objectName: "designFlickable"
+                    clip: true
+                    contentWidth: width
+                    contentHeight: designField.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    interactive: contentHeight > height
+
+                    Components.MarkdownField {
+                        id: designField
+                        objectName: "designField"
+                        width: parent.width
+                        height: Math.max(designScroll.availableHeight, implicitHeight)
+                        placeholderText: qsTr("Implementation notes")
+                        onKeyPressed: event => editor.handlePasteEvent(event)
+                    }
                 }
             }
 
             Controls.ScrollView {
+                id: notesScroll
                 Kirigami.FormData.label: qsTr("Notes:")
                 Kirigami.FormData.labelAlignment: Qt.AlignTop
                 implicitWidth: editor.formFieldWidth
                 implicitHeight: Kirigami.Units.gridUnit * 6
                 Layout.fillWidth: true
+                Controls.ScrollBar.horizontal.policy: Controls.ScrollBar.AlwaysOff
 
-                Controls.TextArea {
-                    id: notesField
-                    objectName: "notesField"
-                    wrapMode: TextEdit.Wrap
-                    placeholderText: qsTr("Additional notes")
-                    Keys.priority: Keys.BeforeItem
-                    Keys.onPressed: event => editor.handlePasteEvent(event)
+                Flickable {
+                    id: notesFlickable
+                    objectName: "notesFlickable"
+                    clip: true
+                    contentWidth: width
+                    contentHeight: notesField.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    interactive: contentHeight > height
+
+                    Components.MarkdownField {
+                        id: notesField
+                        objectName: "notesField"
+                        width: parent.width
+                        height: Math.max(notesScroll.availableHeight, implicitHeight)
+                        placeholderText: qsTr("Additional notes")
+                        onKeyPressed: event => editor.handlePasteEvent(event)
+                    }
                 }
             }
 

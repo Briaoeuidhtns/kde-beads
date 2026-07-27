@@ -19,6 +19,7 @@ fn main() {
     include_bytes_qml!("WorkspacePage.qml", "qml");
     include_bytes_qml!("ProjectDrawer.qml", "qml");
     include_bytes_qml!("components/IssueCopyButton.qml", "qml");
+    include_bytes_qml!("components/MarkdownField.qml", "qml");
     include_bytes_qml!("board/CardDragProxy.qml", "qml");
     include_bytes_qml!("board/KanbanColumn.qml", "qml");
     include_bytes_qml!("board/CollapsibleStatusSection.qml", "qml");

@@ -133,6 +133,70 @@ Item {
             compare(Backend.lastSavedRequest.issueType, "incident");
         }
 
+        function test_long_form_fields_preview_and_edit_markdown() {
+            Backend.issues = [issue("test-markdown", "open")];
+            Backend.detail = {
+                "id": "test-markdown",
+                "title": "Markdown issue",
+                "description": "## Heading\n\n**Bold** and `code`",
+                "acceptance_criteria": "- [ ] First criterion",
+                "design": "Use [Qt](https://qt.io)",
+                "notes": "> Important",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-markdown");
+            const editor = findChild(app, "editorPage");
+            const field = findChild(editor, "descriptionField");
+            const flickable = findChild(editor, "descriptionFlickable");
+            const preview = findChild(editor, "descriptionField-preview");
+            const input = findChild(editor, "descriptionField-editor");
+            editor.detailReady = true;
+
+            compare(field.editing, false);
+            compare(field.text, "## Heading\n\n**Bold** and `code`");
+            compare(preview.textFormat, TextEdit.MarkdownText);
+            compare(preview.visible, true);
+            compare(preview.wrapMode, TextEdit.Wrap);
+            compare(flickable.interactive, false);
+
+            field.beginEditing();
+
+            tryCompare(field, "editing", true);
+            compare(input.visible, true);
+            compare(input.textFormat, TextEdit.PlainText);
+            compare(input.text, "## Heading\n\n**Bold** and `code`");
+            input.text += "\n\nNew paragraph";
+            compare(editor.formValues().description, input.text);
+            field.showPreview();
+            tryCompare(field, "editing", false);
+            compare(preview.visible, true);
+
+            field.text = "# Large heading";
+            field.beginEditing();
+            input.text = "Normal text";
+            field.showPreview();
+            field.beginEditing();
+            compare(input.textFormat, TextEdit.PlainText);
+            compare(input.text, "Normal text");
+
+            input.forceActiveFocus();
+            tryCompare(input, "activeFocus", true);
+            keyClick(Qt.Key_Tab);
+            compare(input.text, "Normal text");
+            compare(field.editing, false);
+
+            field.text = Array(30).fill("Overflowing line").join("\n");
+            tryCompare(flickable, "interactive", true);
+        }
+
         function test_existing_editor_disables_form_until_detail_loads() {
             Backend.issues = [issue("test-loading", "open")];
             createApp();
