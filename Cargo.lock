@@ -447,6 +447,7 @@ dependencies = [
  "qtbridge",
  "serde",
  "serde_json",
+ "tempfile",
  "url",
 ]
 

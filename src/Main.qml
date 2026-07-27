@@ -27,6 +27,7 @@ Kirigami.ApplicationWindow {
     property bool sidebarCollapsedPreference: false
     property var editorPages: []
     property string pendingProjectPath: ""
+    property int nextEditorToken: 0
     readonly property bool editorLayerOpen: editorPages.length > 0
     readonly property var activeEditorPage: editorLayerOpen
         ? editorPages[editorPages.length - 1]
@@ -219,19 +220,23 @@ Kirigami.ApplicationWindow {
         }
         if (Backend.loading)
             return;
+        nextEditorToken += 1;
         editorWindowComponent.createObject(root, {
             "issueId": issueId,
-            "workspace": Backend.workspace
+            "workspace": Backend.workspace,
+            "editorToken": `editor-${nextEditorToken}`
         });
     }
 
     function openCreate(parentId) {
         if (Backend.loading)
             return;
+        nextEditorToken += 1;
         editorWindowComponent.createObject(root, {
             "creating": true,
             "parentId": String(parentId || ""),
-            "workspace": Backend.workspace
+            "workspace": Backend.workspace,
+            "editorToken": `editor-${nextEditorToken}`
         });
     }
 

@@ -17,6 +17,7 @@ Kirigami.ScrollablePage {
     required property var clipboard
     required property bool selected
     required property string workspace
+    required property string editorToken
 
     signal closeRequested()
     signal createChildRequested(string parentId)
@@ -41,6 +42,9 @@ Kirigami.ScrollablePage {
     property string cleanFormState: ""
     property var localDetail: ({})
     property var attachmentPreviews: ({})
+    property string draftId: ""
+    property var draftAttachments: []
+    property bool draftBusy: false
     property alias commentDraft: commentField.text
     readonly property bool persisted: !creating && issueId.length > 0
     readonly property var relationshipDetail: localDetail
@@ -61,10 +65,13 @@ Kirigami.ScrollablePage {
     )
     readonly property bool canSave: !backend.loading
         && !savePending
+        && (!creating || draftId.length > 0)
         && titleField.text.trim().length > 0
         && (creating || detailReady)
-    readonly property bool dirty: cleanFormState.length > 0
-        && cleanFormState !== JSON.stringify(formValues())
+    readonly property bool dirty: (cleanFormState.length > 0
+        && cleanFormState !== JSON.stringify(formValues()))
+        || draftAttachments.length > 0
+    property var displayedAttachments: []
     readonly property real formFieldWidth: Math.max(
         Kirigami.Units.gridUnit * 16,
         Math.min(
@@ -81,6 +88,15 @@ Kirigami.ScrollablePage {
         if (String(mimeType || "").startsWith("text/"))
             return "text-x-generic";
         return "application-x-generic";
+    }
+
+    function refreshDisplayedAttachments() {
+        const persistedAttachments = localDetail && localDetail.attachments
+            ? localDetail.attachments
+            : [];
+        const next = draftAttachments.concat(persistedAttachments);
+        if (JSON.stringify(displayedAttachments) !== JSON.stringify(next))
+            displayedAttachments = next;
     }
 
     function formatBytes(byteSize) {
@@ -183,6 +199,7 @@ Kirigami.ScrollablePage {
     }
 
     function populate() {
+        refreshDisplayedAttachments();
         if (creating)
             return;
         const issue = localDetail || {};
@@ -226,7 +243,8 @@ Kirigami.ScrollablePage {
     function requestAttachmentPreview(attachment) {
         const mimeType = String(attachment.mime_type || "");
         const attachmentId = String(attachment.id || "");
-        if (!mimeType.startsWith("image/")
+        if (attachment.provider === "draft"
+                || !mimeType.startsWith("image/")
                 || attachment.missing
                 || attachmentId.length === 0
                 || attachmentPreviewState(attachmentId) !== undefined) {
@@ -245,6 +263,8 @@ Kirigami.ScrollablePage {
     }
 
     function canAttachFiles() {
+        if (creating)
+            return draftId.length > 0 && !draftBusy && !editor.backend.loading;
         return persisted && detailReady && !editor.backend.loading;
     }
 
@@ -252,8 +272,13 @@ Kirigami.ScrollablePage {
         const localUrls = localFileUrls(urls);
         if (!canAttachFiles() || localUrls.length === 0)
             return false;
-        preserveFieldsWhileLoading = true;
-        editor.backend.addAttachments(issueId, localUrls);
+        if (creating) {
+            draftBusy = true;
+            editor.backend.addDraftAttachments(draftId, localUrls);
+        } else {
+            preserveFieldsWhileLoading = true;
+            editor.backend.addAttachments(issueId, localUrls);
+        }
         return true;
     }
 
@@ -428,12 +453,20 @@ Kirigami.ScrollablePage {
         const request = formValues();
         if (creating) {
             preserveFieldsWhileLoading = true;
-            editor.backend.createIssue(request);
+            editor.backend.createIssue(request, draftId);
         } else {
             submittedFormState = JSON.stringify(request);
             editor.backend.saveIssue(request);
         }
         return true;
+    }
+
+    function discardDraft() {
+        if (draftId.length > 0)
+            backend.discardAttachmentDraft(draftId);
+        draftId = "";
+        draftAttachments = [];
+        draftBusy = false;
     }
 
     function deleteIssue() {
@@ -485,9 +518,10 @@ Kirigami.ScrollablePage {
     }
 
     Component.onCompleted: {
-        if (editor.creating)
+        if (editor.creating) {
             editor.initializeCreate();
-        else {
+            editor.backend.createAttachmentDraft(editor.editorToken);
+        } else {
             if (String(editor.backend.detail.id || "") === editor.issueId)
                 editor.localDetail = editor.backend.detail;
             editor.populate();
@@ -509,6 +543,25 @@ Kirigami.ScrollablePage {
             const previews = Object.assign({}, editor.attachmentPreviews);
             previews[attachmentId] = path;
             editor.attachmentPreviews = previews;
+        }
+
+        function onAttachmentDraftReady(editorToken, draftId) {
+            if (!editor.creating || editorToken !== editor.editorToken)
+                return;
+            editor.draftId = draftId;
+            editor.draftAttachments = [];
+        }
+
+        function onDraftAttachmentsChanged(draftId, attachments) {
+            if (draftId !== editor.draftId)
+                return;
+            try {
+                editor.draftAttachments = JSON.parse(attachments);
+            } catch (error) {
+                editor.draftAttachments = [];
+            }
+            editor.refreshDisplayedAttachments();
+            editor.draftBusy = false;
         }
 
         function onIssueProjectionChanged(workspace, issueId, status, pending) {
@@ -547,6 +600,7 @@ Kirigami.ScrollablePage {
             if (String(editor.backend.detail.id || "") !== editor.issueId)
                 return;
             editor.localDetail = editor.backend.detail;
+            editor.refreshDisplayedAttachments();
             if (!editor.backend.loading) {
                 editor.populate();
                 if (!editor.detailLoadRequested)
@@ -558,6 +612,7 @@ Kirigami.ScrollablePage {
             if (!editor.backend.loading) {
                 if (String(editor.backend.detail.id || "") === editor.issueId) {
                     editor.localDetail = editor.backend.detail;
+                    editor.refreshDisplayedAttachments();
                     editor.detailReady = true;
                 }
                 editor.detailLoadRequested = false;
@@ -574,26 +629,30 @@ Kirigami.ScrollablePage {
             }
         }
 
-        function onIssueSaved(savedId) {
-            if (editor.creating
-                    && editor.isCurrent) {
-                editor.issueId = savedId;
-                editor.creating = false;
-                editor.parentId = "";
-                editor.localDetail = editor.backend.detail;
-                editor.populate();
-                if (editor.closeAfterSave) {
-                    editor.closeAfterSave = false;
-                    editor.closeRequested();
-                    return;
-                }
-                editor.hydratingCreatedIssue = true;
-                editor.requestDetail();
-            } else if (editor.isCurrent) {
-                editor.backend.loadIssue(editor.issueId);
-            } else {
-                editor.refreshWhenCurrent = true;
+        function onIssueCreated(workspace, draftId, issueId, attachmentsComplete) {
+            if (!editor.creating
+                    || workspace !== editor.workspace
+                    || draftId !== editor.draftId) {
+                return;
             }
+            editor.issueId = issueId;
+            editor.creating = false;
+            editor.parentId = "";
+            editor.localDetail = editor.backend.detail;
+            if (attachmentsComplete) {
+                editor.draftId = "";
+                editor.draftAttachments = [];
+            }
+            editor.populate();
+            if (editor.closeAfterSave && attachmentsComplete) {
+                editor.closeAfterSave = false;
+                editor.closeRequested();
+                return;
+            }
+            if (!attachmentsComplete)
+                editor.closeAfterSave = false;
+            editor.hydratingCreatedIssue = true;
+            editor.requestDetail();
         }
 
         function onIssueDeleted(deletedId) {
@@ -790,19 +849,10 @@ Kirigami.ScrollablePage {
                 implicitWidth: editor.formFieldWidth
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
-                Controls.ToolTip.visible: editor.creating && attachmentHover.hovered
-                Controls.ToolTip.text: qsTr("Create the bead before attaching files")
-
-                HoverHandler {
-                    id: attachmentHover
-                    enabled: editor.creating
-                }
 
                 Repeater {
                     objectName: "attachmentsRepeater"
-                    model: editor.localDetail && editor.localDetail.attachments
-                        ? editor.localDetail.attachments
-                        : []
+                    model: editor.displayedAttachments
 
                     delegate: ColumnLayout {
                         id: attachmentRow
@@ -842,7 +892,9 @@ Kirigami.ScrollablePage {
                                 source: typeof attachmentRow.previewState === "string"
                                     && attachmentRow.previewState.length > 0
                                     ? editor.localFileUrl(attachmentRow.previewState)
-                                    : ""
+                                    : (attachmentRow.modelData.provider === "draft"
+                                        ? editor.localFileUrl(attachmentRow.modelData.preview_path)
+                                        : "")
                                 asynchronous: true
                                 fillMode: Image.PreserveAspectFit
                             }
@@ -888,9 +940,11 @@ Kirigami.ScrollablePage {
                                 }
                                 Controls.Label {
                                     text: {
-                                        const provider = attachmentRow.modelData.provider === "polyfill"
-                                            ? qsTr("Knecklace local")
-                                            : qsTr("Beads");
+                                        const provider = attachmentRow.modelData.provider === "draft"
+                                            ? qsTr("Ready to attach")
+                                            : (attachmentRow.modelData.provider === "polyfill"
+                                                ? qsTr("Knecklace local")
+                                                : qsTr("Beads"));
                                         const missing = attachmentRow.modelData.missing
                                             ? ` · ${qsTr("missing locally")}`
                                             : "";
@@ -913,11 +967,17 @@ Kirigami.ScrollablePage {
                                 Controls.ToolTip.text: text
                                 Controls.ToolTip.visible: hovered
                                 onClicked: {
-                                    editor.preserveFieldsWhileLoading = true;
-                                    editor.backend.openAttachment(
-                                        editor.issueId,
-                                        attachmentRow.modelData.id
-                                    );
+                                    if (attachmentRow.modelData.provider === "draft") {
+                                        Qt.openUrlExternally(editor.localFileUrl(
+                                            attachmentRow.modelData.preview_path
+                                        ));
+                                    } else {
+                                        editor.preserveFieldsWhileLoading = true;
+                                        editor.backend.openAttachment(
+                                            editor.issueId,
+                                            attachmentRow.modelData.id
+                                        );
+                                    }
                                 }
                             }
 
@@ -930,11 +990,18 @@ Kirigami.ScrollablePage {
                                 Controls.ToolTip.text: text
                                 Controls.ToolTip.visible: hovered
                                 onClicked: {
-                                    editor.preserveFieldsWhileLoading = true;
-                                    editor.backend.removeAttachment(
-                                        editor.issueId,
-                                        attachmentRow.modelData.id
-                                    );
+                                    if (attachmentRow.modelData.provider === "draft") {
+                                        editor.backend.removeDraftAttachment(
+                                            editor.draftId,
+                                            attachmentRow.modelData.id
+                                        );
+                                    } else {
+                                        editor.preserveFieldsWhileLoading = true;
+                                        editor.backend.removeAttachment(
+                                            editor.issueId,
+                                            attachmentRow.modelData.id
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -951,9 +1018,10 @@ Kirigami.ScrollablePage {
                 }
 
                 Controls.Label {
-                    visible: (editor.detailReady || editor.hydratingCreatedIssue)
-                        && (!editor.localDetail.attachments
-                            || editor.localDetail.attachments.length === 0)
+                    visible: (editor.creating
+                            || editor.detailReady
+                            || editor.hydratingCreatedIssue)
+                        && editor.displayedAttachments.length === 0
                     text: qsTr("No attachments")
                     color: Kirigami.Theme.disabledTextColor
                 }
@@ -964,11 +1032,28 @@ Kirigami.ScrollablePage {
                         objectName: "addAttachmentButton"
                         text: qsTr("Attach file")
                         icon.name: "mail-attachment"
-                        enabled: editor.persisted && !editor.backend.loading
+                        enabled: editor.canAttachFiles()
                         onClicked: {
-                            editor.preserveFieldsWhileLoading = true;
-                            editor.backend.addAttachment(editor.issueId);
+                            if (editor.creating) {
+                                editor.draftBusy = true;
+                                editor.backend.addDraftAttachment(editor.draftId);
+                            } else {
+                                editor.preserveFieldsWhileLoading = true;
+                                editor.backend.addAttachment(editor.issueId);
+                            }
                         }
+                    }
+
+                    Controls.Button {
+                        objectName: "retryDraftAttachmentsButton"
+                        visible: editor.persisted && editor.draftAttachments.length > 0
+                        text: qsTr("Attach remaining")
+                        icon.name: "view-refresh"
+                        enabled: !editor.backend.loading
+                        onClicked: editor.backend.retryDraftAttachments(
+                            editor.issueId,
+                            editor.draftId
+                        )
                     }
 
                     Controls.Button {

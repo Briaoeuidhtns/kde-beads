@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::{HashMap, VecDeque};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use bd_client::{Issue, IssueUpdate, Status};
@@ -14,11 +18,12 @@ use crate::editor_request::{
     attachment_paths_from_urls, issue_update_from_value, new_issue_from_value,
 };
 use crate::operations::{
-    DeleteMutationResult, DetailMutationResult, MutationResult, add_attachment_to_issue,
-    add_attachments_to_issue, add_comment_and_list, add_dependency_and_list, add_todo_and_list,
-    canonical_workspace, create_gate_and_list, create_issue_and_list, delete_issue_and_list,
-    encode_result, list_issues, load_issue_detail, materialize_attachment, migrate_attachments,
-    move_issue, remove_attachment_from_issue, remove_dependency_and_list, remove_gate_and_list,
+    CreateMutationResult, DeleteMutationResult, DetailMutationResult, DraftMigrationResult,
+    MutationResult, add_attachment_to_issue, add_attachments_to_issue, add_comment_and_list,
+    add_dependency_and_list, add_todo_and_list, attach_draft_files, canonical_workspace,
+    create_gate_and_list, create_issue_with_attachments, delete_issue_and_list, encode_result,
+    list_issues, load_issue_detail, materialize_attachment, migrate_attachments, move_issue,
+    remove_attachment_from_issue, remove_dependency_and_list, remove_gate_and_list,
     resolve_gate_and_list, update_issue,
 };
 use crate::workspace_cache::{OptimisticKind, WorkspaceCache};
@@ -70,6 +75,164 @@ struct PendingMutation {
     mutation: OptimisticMutation,
 }
 
+#[derive(Clone)]
+struct DraftAttachmentEntry {
+    id: String,
+    path: PathBuf,
+    original_filename: String,
+    mime_type: String,
+    byte_size: u64,
+}
+
+struct AttachmentDraft {
+    workspace: String,
+    directory: tempfile::TempDir,
+    entries: Mutex<Vec<DraftAttachmentEntry>>,
+    next_id: AtomicU64,
+}
+
+impl AttachmentDraft {
+    fn new(workspace: String) -> Result<Self, String> {
+        let directory = tempfile::Builder::new()
+            .prefix("knecklace-attachments-")
+            .tempdir()
+            .map_err(|error| format!("Could not create attachment staging area: {error}"))?;
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("Could not secure attachment staging area: {error}"))?;
+        Ok(Self {
+            workspace,
+            directory,
+            entries: Mutex::new(Vec::new()),
+            next_id: AtomicU64::new(0),
+        })
+    }
+
+    fn stage_paths(&self, paths: Vec<PathBuf>) -> Result<(), String> {
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| "Attachment staging state is unavailable".to_string())?;
+        for source in paths {
+            let metadata = fs::symlink_metadata(&source).map_err(|error| {
+                format!("Could not inspect attachment {}: {error}", source.display())
+            })?;
+            if !metadata.file_type().is_file() {
+                return Err(format!(
+                    "Attachment {} is not a regular file",
+                    source.display()
+                ));
+            }
+            let original_filename = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    format!(
+                        "Attachment {} does not have a supported filename",
+                        source.display()
+                    )
+                })?
+                .to_string();
+            let sequence = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+            let id = format!("draft-{sequence}");
+            let entry_directory = self.directory.path().join(format!("entry-{sequence}"));
+            fs::create_dir(&entry_directory)
+                .map_err(|error| format!("Could not create attachment staging entry: {error}"))?;
+            fs::set_permissions(&entry_directory, fs::Permissions::from_mode(0o700))
+                .map_err(|error| format!("Could not secure attachment staging entry: {error}"))?;
+            let target = entry_directory.join(&original_filename);
+            if let Err(error) = fs::copy(&source, &target) {
+                let _ = fs::remove_dir_all(&entry_directory);
+                return Err(format!(
+                    "Could not stage attachment {}: {error}",
+                    source.display()
+                ));
+            }
+            if let Err(error) = fs::set_permissions(&target, fs::Permissions::from_mode(0o600)) {
+                let _ = fs::remove_dir_all(&entry_directory);
+                return Err(format!("Could not secure staged attachment: {error}"));
+            }
+            entries.push(DraftAttachmentEntry {
+                id,
+                path: target,
+                original_filename: original_filename.clone(),
+                mime_type: draft_mime_type(&original_filename),
+                byte_size: metadata.len(),
+            });
+        }
+        Ok(())
+    }
+
+    fn rows(&self) -> Vec<Value> {
+        self.entries
+            .lock()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|entry| {
+                        json!({
+                            "id": entry.id,
+                            "original_filename": entry.original_filename,
+                            "mime_type": entry.mime_type,
+                            "byte_size": entry.byte_size,
+                            "provider": "draft",
+                            "missing": false,
+                            "preview_path": entry.path.to_string_lossy(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn files(&self) -> Vec<(String, PathBuf)> {
+        self.entries
+            .lock()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|entry| (entry.id.clone(), entry.path.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn remove(&self, attachment_id: &str) -> Result<(), String> {
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| "Attachment staging state is unavailable".to_string())?;
+        let index = entries
+            .iter()
+            .position(|entry| entry.id == attachment_id)
+            .ok_or_else(|| format!("Staged attachment {attachment_id} was not found"))?;
+        let entry = entries.remove(index);
+        fs::remove_dir_all(entry.path.parent().unwrap_or(&entry.path))
+            .map_err(|error| format!("Could not remove staged attachment: {error}"))
+    }
+
+    fn remove_attached(&self, attachment_ids: &[String]) {
+        let Ok(mut entries) = self.entries.lock() else {
+            return;
+        };
+        entries.retain(|entry| {
+            if attachment_ids.contains(&entry.id) {
+                let _ = fs::remove_dir_all(entry.path.parent().unwrap_or(&entry.path));
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries
+            .lock()
+            .map(|entries| entries.is_empty())
+            .unwrap_or(false)
+    }
+}
+
 pub(crate) struct Backend {
     issues: Vec<Value>,
     detail: Value,
@@ -85,6 +248,7 @@ pub(crate) struct Backend {
     preview_paths: Vec<PreviewPath>,
     mutation_queues: HashMap<String, VecDeque<PendingMutation>>,
     active_mutations: HashMap<String, u64>,
+    attachment_drafts: HashMap<String, Arc<AttachmentDraft>>,
 }
 
 impl Default for Backend {
@@ -105,6 +269,7 @@ impl Default for Backend {
             preview_paths: Vec::new(),
             mutation_queues: HashMap::new(),
             active_mutations: HashMap::new(),
+            attachment_drafts: HashMap::new(),
         }
     }
 }
@@ -149,9 +314,6 @@ impl Backend {
     #[qsignal]
     fn refreshing_changed(&mut self);
 
-    #[qsignal(qml_name = "issueSaved")]
-    fn issue_saved(&mut self, id: &String);
-
     #[qsignal(qml_name = "issueDeleted")]
     fn issue_deleted(&mut self, id: &String);
 
@@ -176,6 +338,21 @@ impl Backend {
         succeeded: bool,
     );
 
+    #[qsignal(qml_name = "attachmentDraftReady")]
+    fn attachment_draft_ready(&mut self, editor_token: &String, draft_id: &String);
+
+    #[qsignal(qml_name = "draftAttachmentsChanged")]
+    fn draft_attachments_changed(&mut self, draft_id: &String, attachments: &String);
+
+    #[qsignal(qml_name = "issueCreated")]
+    fn issue_created(
+        &mut self,
+        workspace: &String,
+        draft_id: &String,
+        issue_id: &String,
+        attachments_complete: bool,
+    );
+
     #[qsignal(qml_name = "workspaceChosen")]
     fn workspace_chosen(&mut self, path: &String);
 
@@ -198,6 +375,109 @@ impl Backend {
     #[qslot]
     fn poll(&mut self) {
         self.start_refresh(false);
+    }
+
+    #[qslot]
+    fn create_attachment_draft(&mut self, editor_token: String) {
+        if editor_token.is_empty() {
+            return;
+        }
+        let workspace = self.workspace.clone();
+        let generation = self.cache.allocate_generation();
+        let draft_id = format!("attachment-draft-{generation}");
+        match AttachmentDraft::new(workspace) {
+            Ok(draft) => {
+                self.attachment_drafts
+                    .insert(draft_id.clone(), Arc::new(draft));
+                self.attachment_draft_ready(&editor_token, &draft_id);
+            }
+            Err(error) => self.set_error(error),
+        }
+    }
+
+    #[qslot]
+    fn discard_attachment_draft(&mut self, draft_id: String) {
+        self.attachment_drafts.remove(&draft_id);
+    }
+
+    #[qslot]
+    fn add_draft_attachment(&mut self, draft_id: String) {
+        let Some(draft) = self.active_attachment_draft(&draft_id) else {
+            return;
+        };
+        let workspace = self.workspace.clone();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let (path, mut error) = choose_attachment_with_kdialog(&workspace);
+            if error.is_empty() && !path.is_empty() {
+                if let Err(stage_error) = draft.stage_paths(vec![PathBuf::from(path)]) {
+                    error = stage_error;
+                }
+            }
+            invoke_method!(invoker, "finishStageDraftAttachments", draft_id, error);
+        });
+    }
+
+    #[qslot]
+    fn add_draft_attachments(&mut self, draft_id: String, urls: Vec<Value>) {
+        let paths = match attachment_paths_from_urls(urls) {
+            Ok(paths) => paths,
+            Err(error) => {
+                self.set_error(error);
+                self.emit_draft_attachments(&draft_id);
+                return;
+            }
+        };
+        let Some(draft) = self.active_attachment_draft(&draft_id) else {
+            return;
+        };
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let error = draft.stage_paths(paths).err().unwrap_or_default();
+            invoke_method!(invoker, "finishStageDraftAttachments", draft_id, error);
+        });
+    }
+
+    #[qslot]
+    fn remove_draft_attachment(&mut self, draft_id: String, attachment_id: String) {
+        let Some(draft) = self.active_attachment_draft(&draft_id) else {
+            return;
+        };
+        if let Err(error) = draft.remove(&attachment_id) {
+            self.set_error(error);
+        }
+        self.emit_draft_attachments(&draft_id);
+    }
+
+    #[qslot]
+    fn retry_draft_attachments(&mut self, issue_id: String, draft_id: String) {
+        if issue_id.is_empty() {
+            return;
+        }
+        let Some(draft) = self.active_attachment_draft(&draft_id) else {
+            return;
+        };
+        let Some((workspace, generation)) = self.begin_foreground(true) else {
+            return;
+        };
+        let result_workspace = workspace.clone();
+        let result_issue_id = issue_id.clone();
+        let generation = generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = attach_draft_files(workspace, &issue_id, draft.files());
+            let (payload, error) = encode_result(result);
+            invoke_method!(
+                invoker,
+                "finishDraftMigration",
+                payload,
+                error,
+                result_workspace,
+                generation,
+                result_issue_id,
+                draft_id
+            );
+        });
     }
 
     #[qslot]
@@ -326,13 +606,16 @@ impl Backend {
     }
 
     #[qslot]
-    fn create_issue(&mut self, request: Value) {
+    fn create_issue(&mut self, request: Value, draft_id: String) {
         let issue = match new_issue_from_value(request) {
             Ok(issue) => issue,
             Err(error) => {
                 self.set_error(error);
                 return;
             }
+        };
+        let Some(draft) = self.active_attachment_draft(&draft_id) else {
+            return;
         };
         let Some((workspace, generation)) = self.begin_foreground(true) else {
             return;
@@ -342,14 +625,16 @@ impl Backend {
         let generation = generation.to_string();
         let invoker = self.get_qml_method_invoker();
         thread::spawn(move || {
-            let (payload, error) = encode_result(create_issue_and_list(workspace, &issue));
+            let result = create_issue_with_attachments(workspace, &issue, draft.files());
+            let (payload, error) = encode_result(result);
             invoke_method!(
                 invoker,
                 "finishCreateIssue",
                 payload,
                 error,
                 result_workspace,
-                generation
+                generation,
+                draft_id
             );
         });
     }
@@ -1075,11 +1360,154 @@ impl Backend {
         error: String,
         workspace: String,
         generation: String,
+        draft_id: String,
     ) {
-        if let Some(created_id) = self.finish_mutation(payload, error, workspace, generation, true)
-        {
-            self.issue_saved(&created_id);
+        let Some(generation) = parse_generation(&generation) else {
+            return;
+        };
+        if !self.cache.foreground_is_current(&workspace, generation) {
+            return;
         }
+        if !error.is_empty() {
+            self.fail_foreground(&workspace, generation, error);
+            return;
+        }
+        let result = match serde_json::from_str::<CreateMutationResult>(&payload) {
+            Ok(result) => result,
+            Err(error) => {
+                self.fail_foreground(
+                    &workspace,
+                    generation,
+                    format!("Could not decode created bead: {error}"),
+                );
+                return;
+            }
+        };
+        let issue_id = result.issue.id.clone();
+        let issue = match serde_json::to_value(result.issue) {
+            Ok(issue) => issue,
+            Err(error) => {
+                self.fail_foreground(
+                    &workspace,
+                    generation,
+                    format!("Could not encode created bead: {error}"),
+                );
+                return;
+            }
+        };
+        let mut needs_refresh = true;
+        if let Some(issues) = result.issues {
+            match issues_to_values(issues) {
+                Ok(issues) => {
+                    self.cache.apply_snapshot(&workspace, generation, issues);
+                    needs_refresh = false;
+                }
+                Err(error) => {
+                    self.cache
+                        .apply_created_issue(&workspace, generation, issue.clone());
+                    self.cache.set_error(&workspace, generation, error);
+                }
+            }
+        } else {
+            self.cache
+                .apply_created_issue(&workspace, generation, issue.clone());
+        }
+        if self.workspace == workspace {
+            self.set_detail(issue);
+        }
+        if !result.warning.is_empty() {
+            self.cache.set_error(&workspace, generation, result.warning);
+        }
+        if let Some(draft) = self.attachment_drafts.get(&draft_id).cloned() {
+            draft.remove_attached(&result.attached_draft_ids);
+            if result.attachments_complete && draft.is_empty() {
+                self.attachment_drafts.remove(&draft_id);
+            } else {
+                self.emit_draft_attachments(&draft_id);
+            }
+        }
+        self.complete_foreground(&workspace, generation);
+        if needs_refresh {
+            self.start_workspace_refresh(workspace.clone(), false);
+        }
+        self.issue_created(
+            &workspace,
+            &draft_id,
+            &issue_id,
+            result.attachments_complete,
+        );
+    }
+
+    #[qslot(qml_name = "finishStageDraftAttachments")]
+    fn finish_stage_draft_attachments(&mut self, draft_id: String, error: String) {
+        let Some(draft) = self.attachment_drafts.get(&draft_id) else {
+            return;
+        };
+        if !error.is_empty() && draft.workspace == self.workspace {
+            self.set_error(error);
+        }
+        self.emit_draft_attachments(&draft_id);
+    }
+
+    #[qslot(qml_name = "finishDraftMigration")]
+    fn finish_draft_migration(
+        &mut self,
+        payload: String,
+        error: String,
+        workspace: String,
+        generation: String,
+        issue_id: String,
+        draft_id: String,
+    ) {
+        let Some(generation) = parse_generation(&generation) else {
+            return;
+        };
+        if !self.cache.foreground_is_current(&workspace, generation) {
+            return;
+        }
+        if !error.is_empty() {
+            self.fail_foreground(&workspace, generation, error);
+            return;
+        }
+        let result = match serde_json::from_str::<DraftMigrationResult>(&payload) {
+            Ok(result) => result,
+            Err(error) => {
+                self.fail_foreground(
+                    &workspace,
+                    generation,
+                    format!("Could not decode attached files: {error}"),
+                );
+                return;
+            }
+        };
+        let updated = match serde_json::to_value(result.issue) {
+            Ok(updated) => updated,
+            Err(error) => {
+                self.fail_foreground(
+                    &workspace,
+                    generation,
+                    format!("Could not encode attached files: {error}"),
+                );
+                return;
+            }
+        };
+        self.cache
+            .apply_issue_update(&workspace, generation, updated.clone());
+        if self.detail_matches(&workspace, &issue_id) {
+            merge_attachment_fields(&mut self.detail, &updated);
+            self.detail_changed();
+        }
+        if !result.warning.is_empty() {
+            self.cache.set_error(&workspace, generation, result.warning);
+        }
+        if let Some(draft) = self.attachment_drafts.get(&draft_id).cloned() {
+            draft.remove_attached(&result.attached_draft_ids);
+            self.emit_draft_attachments(&draft_id);
+            if result.attachments_complete && draft.is_empty() {
+                self.attachment_drafts.remove(&draft_id);
+            }
+        }
+        self.complete_foreground(&workspace, generation);
     }
 
     #[qslot(qml_name = "finishTodoMutation")]
@@ -1556,6 +1984,29 @@ impl Backend {
         );
     }
 
+    fn active_attachment_draft(&mut self, draft_id: &str) -> Option<Arc<AttachmentDraft>> {
+        let draft = self.attachment_drafts.get(draft_id).cloned();
+        match draft {
+            Some(draft) if draft.workspace == self.workspace => Some(draft),
+            Some(_) => {
+                self.set_error("The attachment draft belongs to another workspace".to_string());
+                None
+            }
+            None => {
+                self.set_error("The attachment draft is no longer available".to_string());
+                None
+            }
+        }
+    }
+
+    fn emit_draft_attachments(&mut self, draft_id: &str) {
+        let Some(draft) = self.attachment_drafts.get(draft_id) else {
+            return;
+        };
+        let attachments = serde_json::to_string(&draft.rows()).unwrap_or_else(|_| "[]".to_string());
+        self.draft_attachments_changed(&draft_id.to_string(), &attachments);
+    }
+
     fn start_refresh(&mut self, report_errors: bool) {
         self.start_workspace_refresh(self.workspace.clone(), report_errors);
     }
@@ -1685,6 +2136,43 @@ fn issue_update_patch(update: &IssueUpdate) -> Map<String, Value> {
     ])
 }
 
+fn merge_attachment_fields(detail: &mut Value, updated: &Value) {
+    let (Some(detail), Some(updated)) = (detail.as_object_mut(), updated.as_object()) else {
+        return;
+    };
+    for key in [
+        "attachments",
+        "metadata",
+        "native_attachments_supported",
+        "polyfill_attachment_count",
+        "updated_at",
+    ] {
+        if let Some(value) = updated.get(key) {
+            detail.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+fn draft_mime_type(filename: &str) -> String {
+    let extension = std::path::Path::new(filename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "txt" | "md" | "csv" | "log" => "text/plain",
+        "json" => "application/json",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
 fn parse_generation(generation: &str) -> Option<u64> {
     generation.parse().ok()
 }
@@ -1737,6 +2225,8 @@ fn initial_workspace() -> (PathBuf, bool) {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::{MetadataExt, symlink};
+
     use super::*;
 
     #[test]
@@ -1749,5 +2239,58 @@ mod tests {
         ));
         assert!(replace_if_changed(&mut issues, vec![json!({"id": "bd-2"})]));
         assert_eq!(issues, vec![json!({"id": "bd-2"})]);
+    }
+
+    #[test]
+    fn attachment_draft_snapshots_files_with_private_permissions() {
+        let sources = tempfile::TempDir::new().unwrap();
+        let source = sources.path().join("before save.txt");
+        fs::write(&source, b"original bytes").unwrap();
+        let draft = AttachmentDraft::new("/workspace".to_string()).unwrap();
+
+        draft.stage_paths(vec![source.clone()]).unwrap();
+        fs::write(&source, b"changed bytes").unwrap();
+
+        let files = draft.files();
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].1.file_name().and_then(|name| name.to_str()),
+            Some("before save.txt")
+        );
+        assert_eq!(fs::read(&files[0].1).unwrap(), b"original bytes");
+        assert_eq!(fs::metadata(&files[0].1).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(draft.rows()[0]["original_filename"], "before save.txt");
+        assert_eq!(draft.rows()[0]["mime_type"], "text/plain");
+    }
+
+    #[test]
+    fn attachment_draft_removes_entries_and_storage_on_drop() {
+        let sources = tempfile::TempDir::new().unwrap();
+        let source = sources.path().join("one.png");
+        fs::write(&source, b"png bytes").unwrap();
+        let draft = AttachmentDraft::new("/workspace".to_string()).unwrap();
+        let directory = draft.directory.path().to_path_buf();
+        draft.stage_paths(vec![source]).unwrap();
+        let id = draft.files()[0].0.clone();
+
+        draft.remove(&id).unwrap();
+        assert!(draft.is_empty());
+        drop(draft);
+        assert!(!directory.exists());
+    }
+
+    #[test]
+    fn attachment_draft_rejects_symlink_sources() {
+        let sources = tempfile::TempDir::new().unwrap();
+        let source = sources.path().join("source.txt");
+        let link = sources.path().join("link.txt");
+        fs::write(&source, b"bytes").unwrap();
+        symlink(&source, &link).unwrap();
+        let draft = AttachmentDraft::new("/workspace".to_string()).unwrap();
+
+        let error = draft.stage_paths(vec![link]).unwrap_err();
+
+        assert!(error.contains("not a regular file"));
+        assert!(draft.is_empty());
     }
 }

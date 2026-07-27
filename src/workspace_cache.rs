@@ -316,6 +316,36 @@ impl WorkspaceCache {
         true
     }
 
+    pub(crate) fn apply_created_issue(
+        &mut self,
+        workspace: &str,
+        generation: u64,
+        issue: Value,
+    ) -> bool {
+        let Some(state) = self.states.get_mut(workspace) else {
+            return false;
+        };
+        if state.latest_issue_generation != generation {
+            return false;
+        }
+        let Some(issue_id) = issue.get("id").and_then(Value::as_str) else {
+            return false;
+        };
+        let Some(issues) = state.issues.as_mut() else {
+            state.issues = Some(vec![issue]);
+            return true;
+        };
+        if let Some(existing) = issues
+            .iter_mut()
+            .find(|existing| existing.get("id").and_then(Value::as_str) == Some(issue_id))
+        {
+            *existing = issue;
+        } else {
+            issues.push(issue);
+        }
+        true
+    }
+
     pub(crate) fn set_error(&mut self, workspace: &str, generation: u64, error: String) -> bool {
         let state = self.states.entry(workspace.to_string()).or_default();
         if generation < state.error_generation {
@@ -618,6 +648,28 @@ mod tests {
             vec![json!({"id": "one", "attachments": ["added"]})]
         );
         assert_eq!(view.error, "one file failed");
+    }
+
+    #[test]
+    fn successful_create_can_be_applied_when_the_followup_list_fails() {
+        let mut cache = WorkspaceCache::default();
+        store(&mut cache, "/one", vec![issue("existing")]);
+        let generation = cache.begin_foreground("/one", true).unwrap();
+
+        assert!(cache.apply_created_issue(
+            "/one",
+            generation,
+            json!({"id": "created", "status": "open"}),
+        ));
+        assert!(cache.finish_foreground("/one", generation));
+
+        assert_eq!(
+            cache.view("/one").issues,
+            vec![
+                issue("existing"),
+                json!({"id": "created", "status": "open"})
+            ]
+        );
     }
 
     #[test]

@@ -13,6 +13,23 @@ pub(crate) struct MutationResult {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct CreateMutationResult {
+    pub(crate) issue: Issue,
+    pub(crate) issues: Option<Vec<Issue>>,
+    pub(crate) warning: String,
+    pub(crate) attached_draft_ids: Vec<String>,
+    pub(crate) attachments_complete: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DraftMigrationResult {
+    pub(crate) issue: Issue,
+    pub(crate) warning: String,
+    pub(crate) attached_draft_ids: Vec<String>,
+    pub(crate) attachments_complete: bool,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct DeleteMutationResult {
     pub(crate) issues: Option<Vec<Issue>>,
     pub(crate) warning: String,
@@ -67,11 +84,76 @@ pub(crate) fn update_issue(
     Client::new(workspace)?.update(update)
 }
 
-pub(crate) fn create_issue_and_list(
+pub(crate) fn create_issue_with_attachments(
     workspace: String,
     issue: &NewIssue,
-) -> Result<MutationResult, bd_client::Error> {
-    mutate_and_list(workspace, |client| client.create(issue))
+    attachments: Vec<(String, PathBuf)>,
+) -> Result<CreateMutationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    let mut created = client.create(issue)?;
+    let mut attached_draft_ids = Vec::new();
+    let mut warnings = Vec::new();
+    let attachment_count = attachments.len();
+    for (draft_id, path) in attachments {
+        match client.add_attachment(&created.id, path) {
+            Ok(updated) => {
+                created = updated;
+                attached_draft_ids.push(draft_id);
+            }
+            Err(error) => warnings.push(format!(
+                "Bead {} was created, but an attachment could not be added: {error}",
+                created.id
+            )),
+        }
+    }
+    let issues = match client.list() {
+        Ok(issues) => Some(issues),
+        Err(error) => {
+            warnings.push(format!(
+                "Bead {} was created, but the board could not be refreshed: {error}",
+                created.id
+            ));
+            None
+        }
+    };
+    let attachments_complete = attached_draft_ids.len() == attachment_count;
+    Ok(CreateMutationResult {
+        issue: created,
+        issues,
+        warning: warnings.join("\n"),
+        attached_draft_ids,
+        attachments_complete,
+    })
+}
+
+pub(crate) fn attach_draft_files(
+    workspace: String,
+    issue_id: &str,
+    attachments: Vec<(String, PathBuf)>,
+) -> Result<DraftMigrationResult, bd_client::Error> {
+    let client = Client::new(workspace)?;
+    let mut issue = client.show(issue_id)?;
+    let mut attached_draft_ids = Vec::new();
+    let mut warnings = Vec::new();
+    let attachment_count = attachments.len();
+    for (draft_id, path) in attachments {
+        match client.add_attachment(issue_id, path) {
+            Ok(updated) => {
+                issue = updated;
+                attached_draft_ids.push(draft_id);
+            }
+            Err(error) => warnings.push(format!(
+                "Could not attach a staged file to bead {issue_id}: {error}"
+            )),
+        }
+    }
+    let attachments_complete = attached_draft_ids.len() == attachment_count;
+    Ok(DraftMigrationResult {
+        issue,
+        warning: warnings.join("\n"),
+        attached_draft_ids,
+        attachments_complete,
+    })
 }
 
 pub(crate) fn add_todo_and_list(

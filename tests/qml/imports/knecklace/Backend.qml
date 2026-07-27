@@ -35,6 +35,12 @@ QtObject {
     property int migrateAttachmentsCallCount: 0
     property int chooseWorkspaceCallCount: 0
     property int switchWorkspaceCallCount: 0
+    property int createAttachmentDraftCallCount: 0
+    property int addDraftAttachmentCallCount: 0
+    property int addDraftAttachmentsCallCount: 0
+    property int removeDraftAttachmentCallCount: 0
+    property int discardAttachmentDraftCallCount: 0
+    property int retryDraftAttachmentsCallCount: 0
     property string lastLoadedId: ""
     property string lastMovedId: ""
     property string lastMovedStatus: ""
@@ -57,14 +63,20 @@ QtObject {
     property string lastAttachmentId: ""
     property var lastAttachmentUrls: []
     property string lastSwitchedWorkspace: ""
+    property string lastDraftId: ""
+    property string lastDraftAttachmentId: ""
+    property var lastDraftAttachmentUrls: []
+    property string lastCreatedDraftId: ""
     property int nextMutationGeneration: 0
     property var pendingOriginalStatuses: ({})
 
-    signal issueSaved(string savedId)
     signal issueDeleted(string deletedId)
     signal issueProjectionChanged(string workspace, string issueId, string status, bool pending)
     signal issueSaveStarted(string workspace, string issueId, string generation)
     signal issueSaveFinished(string workspace, string issueId, string generation, bool succeeded)
+    signal attachmentDraftReady(string editorToken, string draftId)
+    signal draftAttachmentsChanged(string draftId, string attachments)
+    signal issueCreated(string workspace, string draftId, string issueId, bool attachmentsComplete)
     signal workspaceChosen(string path)
     signal attachmentReady(string issueId, string path)
     signal attachmentPreviewReady(string issueId, string attachmentId, string path)
@@ -99,6 +111,12 @@ QtObject {
         migrateAttachmentsCallCount = 0;
         chooseWorkspaceCallCount = 0;
         switchWorkspaceCallCount = 0;
+        createAttachmentDraftCallCount = 0;
+        addDraftAttachmentCallCount = 0;
+        addDraftAttachmentsCallCount = 0;
+        removeDraftAttachmentCallCount = 0;
+        discardAttachmentDraftCallCount = 0;
+        retryDraftAttachmentsCallCount = 0;
         lastLoadedId = "";
         lastMovedId = "";
         lastMovedStatus = "";
@@ -121,6 +139,10 @@ QtObject {
         lastAttachmentId = "";
         lastAttachmentUrls = [];
         lastSwitchedWorkspace = "";
+        lastDraftId = "";
+        lastDraftAttachmentId = "";
+        lastDraftAttachmentUrls = [];
+        lastCreatedDraftId = "";
         nextMutationGeneration = 0;
         pendingOriginalStatuses = {};
     }
@@ -136,6 +158,44 @@ QtObject {
     function loadIssue(issueId) {
         loadIssueCallCount += 1;
         lastLoadedId = issueId;
+    }
+
+    function createAttachmentDraft(editorToken) {
+        createAttachmentDraftCallCount += 1;
+        lastDraftId = `test-draft-${createAttachmentDraftCallCount}`;
+        attachmentDraftReady(editorToken, lastDraftId);
+    }
+
+    function addDraftAttachment(draftId) {
+        addDraftAttachmentCallCount += 1;
+        lastDraftId = draftId;
+    }
+
+    function addDraftAttachments(draftId, urls) {
+        addDraftAttachmentsCallCount += 1;
+        lastDraftId = draftId;
+        lastDraftAttachmentUrls = urls;
+    }
+
+    function removeDraftAttachment(draftId, attachmentId) {
+        removeDraftAttachmentCallCount += 1;
+        lastDraftId = draftId;
+        lastDraftAttachmentId = attachmentId;
+    }
+
+    function discardAttachmentDraft(draftId) {
+        discardAttachmentDraftCallCount += 1;
+        lastDraftId = draftId;
+    }
+
+    function retryDraftAttachments(issueId, draftId) {
+        retryDraftAttachmentsCallCount += 1;
+        lastAttachmentIssueId = issueId;
+        lastDraftId = draftId;
+    }
+
+    function setDraftAttachments(draftId, attachments) {
+        draftAttachmentsChanged(draftId, JSON.stringify(attachments));
     }
 
     function moveIssue(issueId, status) {
@@ -213,9 +273,10 @@ QtObject {
         issueSaveFinished(workspace, issueId, String(generation), succeeded);
     }
 
-    function createIssue(request) {
+    function createIssue(request, draftId) {
         createIssueCallCount += 1;
         lastCreatedRequest = request;
+        lastCreatedDraftId = draftId;
     }
 
     function addTodo(title) {

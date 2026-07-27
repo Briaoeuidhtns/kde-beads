@@ -103,6 +103,7 @@ Item {
             compare(Backend.lastCreatedRequest.priority, "2");
             compare(Backend.lastCreatedRequest.issueType, "task");
             compare(Backend.lastCreatedRequest.parentId, "");
+            compare(Backend.lastCreatedDraftId, editor.draftId);
         }
 
         function test_existing_custom_type_is_preserved_as_a_static_option() {
@@ -344,7 +345,9 @@ Item {
             compare(findChild(editor, "attachmentsSection").visible, true);
             compare(findChild(editor, "relationshipsSection").visible, true);
             compare(findChild(editor, "commentsSection").visible, false);
-            compare(findChild(editor, "addAttachmentButton").enabled, false);
+            compare(Backend.createAttachmentDraftCallCount, 1);
+            compare(editor.draftId, "test-draft-1");
+            compare(findChild(editor, "addAttachmentButton").enabled, true);
             Backend.detail = {
                 "id": "test-created",
                 "title": "Created issue",
@@ -358,7 +361,12 @@ Item {
                 "comments": []
             };
 
-            Backend.issueSaved("test-created");
+            Backend.issueCreated(
+                Backend.workspace,
+                editor.draftId,
+                "test-created",
+                true
+            );
 
             compare(editor.creating, false);
             compare(editor.persisted, true);
@@ -786,7 +794,12 @@ Item {
                 "dependents": [],
                 "comments": []
             };
-            Backend.issueSaved("test-saved-on-close");
+            Backend.issueCreated(
+                Backend.workspace,
+                editor.draftId,
+                "test-saved-on-close",
+                true
+            );
 
             tryVerify(() => findChild(app, "editorPage") === null);
         }
@@ -820,7 +833,12 @@ Item {
                 "dependents": [],
                 "comments": []
             };
-            Backend.issueSaved("test-create-and-close");
+            Backend.issueCreated(
+                Backend.workspace,
+                editor.draftId,
+                "test-create-and-close",
+                true
+            );
 
             tryVerify(() => findChild(app, "editorPage") === null);
         }
@@ -960,6 +978,10 @@ Item {
             const repeater = findChild(app, "attachmentsRepeater");
             verify(repeater);
             tryCompare(repeater, "count", 1);
+            const attachmentRows = editor.displayedAttachments;
+            Backend.detail = Object.assign({}, Backend.detail, { "comments": [] });
+            wait(0);
+            verify(editor.displayedAttachments === attachmentRows);
             const attachmentRow = repeater.itemAt(0);
             verify(attachmentRow);
             verify(findChild(attachmentRow, "attachmentName"));
@@ -994,6 +1016,193 @@ Item {
             findChild(app, "migrateAttachmentsButton").clicked();
             compare(Backend.migrateAttachmentsCallCount, 1);
             compare(app.localFileUrl("/tmp/a b#c"), "file:///tmp/a%20b%23c");
+        }
+
+        function test_create_editor_stages_and_removes_attachments() {
+            createApp();
+            const editor = openCreateEditor();
+            const repeater = findChild(editor, "attachmentsRepeater");
+            const draft = {
+                "id": "draft-1",
+                "original_filename": "before save.png",
+                "mime_type": "image/png",
+                "byte_size": 512,
+                "provider": "draft",
+                "missing": false,
+                "preview_path": "/tmp/staged-image"
+            };
+
+            compare(editor.dirty, false);
+            Backend.setDraftAttachments(editor.draftId, [draft]);
+
+            tryCompare(repeater, "count", 1);
+            compare(editor.dirty, true);
+            compare(repeater.model[0].provider, "draft");
+            const row = repeater.itemAt(0);
+            verify(row);
+            verify(findChild(row, "attachmentPreview").visible);
+            findChild(row, "removeAttachmentButton").clicked();
+            compare(Backend.removeDraftAttachmentCallCount, 1);
+            compare(Backend.lastDraftId, editor.draftId);
+            compare(Backend.lastDraftAttachmentId, "draft-1");
+
+            Backend.setDraftAttachments(editor.draftId, []);
+            compare(editor.dirty, false);
+        }
+
+        function test_create_editor_attaches_local_urls_to_its_draft() {
+            createApp();
+            const editor = openCreateEditor();
+
+            verify(editor.attachFileUrls([
+                "file:///tmp/before-save.png",
+                "https://example.com/not-local",
+                "file:///tmp/two%20words.txt"
+            ]));
+
+            compare(Backend.addDraftAttachmentsCallCount, 1);
+            compare(Backend.lastDraftId, editor.draftId);
+            compare(Backend.lastDraftAttachmentUrls.length, 2);
+            compare(Backend.lastDraftAttachmentUrls[1], "file:///tmp/two%20words.txt");
+            compare(editor.draftBusy, true);
+            Backend.setDraftAttachments(editor.draftId, []);
+            compare(editor.draftBusy, false);
+        }
+
+        function test_create_completion_is_scoped_to_the_submitting_editor() {
+            createApp();
+            app.openCreate();
+            app.openCreate();
+            tryVerify(() => app.editorPages.length === 2);
+            const first = app.editorPages[0];
+            const second = app.editorPages[1];
+            compare(first.draftId, "test-draft-1");
+            compare(second.draftId, "test-draft-2");
+            Backend.detail = {
+                "id": "test-scoped-create",
+                "title": "Scoped create",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": []
+            };
+
+            Backend.issueCreated(
+                Backend.workspace,
+                first.draftId,
+                "test-scoped-create",
+                true
+            );
+
+            compare(first.creating, false);
+            compare(first.issueId, "test-scoped-create");
+            compare(second.creating, true);
+            compare(second.issueId, "");
+        }
+
+        function test_partial_create_keeps_unattached_drafts_for_retry() {
+            createApp();
+            const editor = openCreateEditor();
+            const draftId = editor.draftId;
+            Backend.setDraftAttachments(draftId, [{
+                "id": "draft-failed",
+                "original_filename": "retry.txt",
+                "mime_type": "text/plain",
+                "byte_size": 10,
+                "provider": "draft",
+                "missing": false,
+                "preview_path": "/tmp/staged-text"
+            }]);
+            Backend.detail = {
+                "id": "test-partial-create",
+                "title": "Partial create",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": []
+            };
+
+            Backend.issueCreated(
+                Backend.workspace,
+                draftId,
+                "test-partial-create",
+                false
+            );
+
+            compare(editor.persisted, true);
+            compare(editor.draftId, draftId);
+            compare(editor.draftAttachments.length, 1);
+            const retry = findChild(editor, "retryDraftAttachmentsButton");
+            verify(retry.visible);
+            retry.clicked();
+            compare(Backend.retryDraftAttachmentsCallCount, 1);
+            compare(Backend.lastAttachmentIssueId, "test-partial-create");
+            compare(Backend.lastDraftId, draftId);
+        }
+
+        function test_successful_create_replaces_draft_row_atomically() {
+            createApp();
+            const editor = openCreateEditor();
+            const draftId = editor.draftId;
+            Backend.setDraftAttachments(draftId, [{
+                "id": "draft-success",
+                "original_filename": "created.png",
+                "mime_type": "image/png",
+                "byte_size": 20,
+                "provider": "draft",
+                "missing": false,
+                "preview_path": "/tmp/staged-created-image"
+            }]);
+            const persistedAttachment = {
+                "id": "polyfill:created",
+                "original_filename": "created.png",
+                "mime_type": "image/png",
+                "byte_size": 20,
+                "provider": "polyfill",
+                "missing": false
+            };
+            Backend.detail = {
+                "id": "test-created-with-attachment",
+                "title": "Created with attachment",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [persistedAttachment]
+            };
+
+            Backend.issueCreated(
+                Backend.workspace,
+                draftId,
+                "test-created-with-attachment",
+                true
+            );
+
+            const repeater = findChild(editor, "attachmentsRepeater");
+            tryCompare(repeater, "count", 1);
+            compare(editor.displayedAttachments[0].provider, "polyfill");
+            const attachmentRows = editor.displayedAttachments;
+            Backend.detail = Object.assign({}, Backend.detail, {
+                "comments": [],
+                "attachments": [Object.assign({}, persistedAttachment)]
+            });
+            wait(0);
+            verify(editor.displayedAttachments === attachmentRows);
+            compare(repeater.count, 1);
+        }
+
+        function test_discarding_create_editor_releases_its_draft() {
+            createApp();
+            const editor = openCreateEditor();
+            const draftId = editor.draftId;
+
+            editor.Window.window.discardAndClose();
+
+            tryVerify(() => app.editorPages.length === 0);
+            compare(Backend.discardAttachmentDraftCallCount, 1);
+            compare(Backend.lastDraftId, draftId);
         }
 
         function test_existing_issue_attaches_file_urls() {

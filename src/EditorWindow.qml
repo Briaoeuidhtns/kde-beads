@@ -15,6 +15,7 @@ Kirigami.ApplicationWindow {
     required property var clipboard
     required property var activeEditor
     required property string workspace
+    required property string editorToken
     property alias issueId: editor.issueId
     property alias creating: editor.creating
     property alias parentId: editor.parentId
@@ -59,7 +60,10 @@ Kirigami.ApplicationWindow {
         show();
         requestActivate();
     }
-    Component.onDestruction: editorClosed(editor)
+    Component.onDestruction: {
+        editor.discardDraft();
+        editorClosed(editor);
+    }
     onClosing: closeEvent => {
         if (!forceClosing && editor.dirty) {
             closeEvent.accepted = false;
@@ -82,6 +86,7 @@ Kirigami.ApplicationWindow {
         clipboard: editorWindow.clipboard
         selected: editorWindow.activeEditor === editor
         workspace: editorWindow.workspace
+        editorToken: editorWindow.editorToken
         onCloseRequested: editorWindow.requestClose()
         onCreateChildRequested: parentId => editorWindow.createChildRequested(parentId)
         onDeleteRequested: deleteIssueDialog.open()
