@@ -19,6 +19,7 @@ Kirigami.GlobalDrawer {
     property bool stateInitialized: false
 
     signal projectSelected(string path)
+    signal removeProjectRequested(string path)
     signal addProjectRequested()
     signal collapsedPreferenceChanged(bool collapsed)
 
@@ -70,6 +71,7 @@ Kirigami.GlobalDrawer {
             model: projectSidebar.projects
 
             delegate: Controls.ItemDelegate {
+                id: projectItem
                 required property string modelData
                 required property int index
                 objectName: `projectItem-${index}`
@@ -84,6 +86,54 @@ Kirigami.GlobalDrawer {
                 Controls.ToolTip.text: modelData
                 Controls.ToolTip.visible: hovered
                 onClicked: projectSidebar.projectSelected(modelData)
+
+                contentItem: RowLayout {
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Kirigami.Icon {
+                        source: projectItem.icon.name
+                        color: projectItem.highlighted
+                            ? Kirigami.Theme.highlightedTextColor
+                            : Kirigami.Theme.textColor
+                        implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                        implicitHeight: implicitWidth
+                    }
+
+                    Controls.Label {
+                        objectName: `projectLabel-${projectItem.index}`
+                        visible: !projectSidebar.collapsed
+                        text: projectItem.text
+                        color: projectItem.highlighted
+                            ? Kirigami.Theme.highlightedTextColor
+                            : Kirigami.Theme.textColor
+                        elide: Text.ElideMiddle
+                        verticalAlignment: Text.AlignVCenter
+                        Layout.fillWidth: true
+                    }
+
+                    Item {
+                        visible: !projectSidebar.collapsed
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 2
+                        Layout.fillHeight: true
+
+                        Controls.ToolButton {
+                            id: removeProjectButton
+                            objectName: `removeProjectButton-${projectItem.index}`
+                            anchors.fill: parent
+                            visible: projectItem.modelData !== projectSidebar.currentWorkspace
+                            enabled: visible
+                            text: qsTr("Remove project")
+                            icon.name: "list-remove"
+                            display: Controls.AbstractButton.IconOnly
+                            Accessible.description: qsTr("Remove %1 from the project list").arg(
+                                projectSidebar.projectName(projectItem.modelData)
+                            )
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: projectSidebar.removeProjectRequested(projectItem.modelData)
+                        }
+                    }
+                }
             }
         }
 

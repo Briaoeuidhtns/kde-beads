@@ -104,6 +104,18 @@ Kirigami.ApplicationWindow {
             persistProjects(Backend.workspace);
     }
 
+    function removeProject(path) {
+        const project = String(path || "").trim();
+        if (project.length === 0 || project === Backend.workspace)
+            return false;
+        const projects = knownProjects.filter(candidate => candidate !== project);
+        if (projects.length === knownProjects.length)
+            return false;
+        knownProjects = projects;
+        persistProjects(Backend.workspace);
+        return true;
+    }
+
     function switchProject(path) {
         if (path === Backend.workspace)
             return;
@@ -363,6 +375,7 @@ Kirigami.ApplicationWindow {
         windowWidth: root.width
         preferredCollapsed: root.sidebarCollapsedPreference
         onProjectSelected: path => root.selectProject(path)
+        onRemoveProjectRequested: path => root.removeProject(path)
         onAddProjectRequested: Backend.chooseWorkspace()
         onCollapsedPreferenceChanged: collapsed => root.rememberSidebarCollapsed(collapsed)
     }

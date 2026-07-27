@@ -349,6 +349,7 @@ Item {
             compare(list.count, 1);
             compare(list.itemAt(0).text, "knecklace-tests");
             compare(list.itemAt(0).highlighted, true);
+            verify(findChild(list.itemAt(0), "projectLabel-0"));
 
             addButton.clicked();
             compare(Backend.chooseWorkspaceCallCount, 1);
@@ -362,6 +363,36 @@ Item {
             compare(Backend.lastSwitchedWorkspace, "/tmp/another-project");
             compare(Backend.workspace, "/tmp/another-project");
             compare(list.itemAt(1).highlighted, true);
+        }
+
+        function test_project_sidebar_removes_non_current_projects() {
+            createApp([]);
+            app.rememberProject("/tmp/remove-me");
+            const list = findChild(app, "projectList");
+            tryCompare(list, "count", 2);
+            const currentRemove = findChild(list.itemAt(0), "removeProjectButton-0");
+            const remove = findChild(list.itemAt(1), "removeProjectButton-1");
+            verify(currentRemove);
+            verify(remove);
+            compare(currentRemove.visible, false);
+            compare(currentRemove.enabled, false);
+            compare(remove.visible, true);
+            compare(remove.enabled, true);
+
+            remove.clicked();
+
+            tryCompare(list, "count", 1);
+            compare(app.knownProjects.includes("/tmp/remove-me"), false);
+            compare(Backend.switchWorkspaceCallCount, 0);
+            compare(Backend.workspace, "/tmp/knecklace-tests");
+        }
+
+        function test_current_project_cannot_be_removed() {
+            createApp([]);
+
+            compare(app.removeProject(Backend.workspace), false);
+            compare(app.knownProjects.length, 1);
+            compare(app.knownProjects[0], Backend.workspace);
         }
 
         function test_project_switching_remains_available_while_loading() {
