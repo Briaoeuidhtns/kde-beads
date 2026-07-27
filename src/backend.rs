@@ -15,11 +15,11 @@ use crate::editor_request::{
 };
 use crate::operations::{
     DeleteMutationResult, DetailMutationResult, MutationResult, add_attachment_to_issue,
-    add_attachments_to_issue, add_comment_and_list, add_dependency_and_list, canonical_workspace,
-    create_gate_and_list, create_issue_and_list, delete_issue_and_list, encode_result, list_issues,
-    load_issue_detail, materialize_attachment, migrate_attachments, move_issue_and_list,
-    remove_attachment_from_issue, remove_dependency_and_list, remove_gate_and_list,
-    resolve_gate_and_list, update_issue_and_list,
+    add_attachments_to_issue, add_comment_and_list, add_dependency_and_list, add_todo_and_list,
+    canonical_workspace, create_gate_and_list, create_issue_and_list, delete_issue_and_list,
+    encode_result, list_issues, load_issue_detail, materialize_attachment, migrate_attachments,
+    move_issue_and_list, remove_attachment_from_issue, remove_dependency_and_list,
+    remove_gate_and_list, resolve_gate_and_list, update_issue_and_list,
 };
 use crate::workspace_cache::WorkspaceCache;
 
@@ -266,6 +266,33 @@ impl Backend {
             invoke_method!(
                 invoker,
                 "finishCreateIssue",
+                payload,
+                error,
+                result_workspace,
+                generation
+            );
+        });
+    }
+
+    #[qslot]
+    fn add_todo(&mut self, title: String) {
+        let title = title.trim().to_string();
+        if title.is_empty() {
+            self.set_error("A todo title is required".to_string());
+            return;
+        }
+        let Some((workspace, generation)) = self.begin_foreground(true) else {
+            return;
+        };
+
+        let result_workspace = workspace.clone();
+        let generation = generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let (payload, error) = encode_result(add_todo_and_list(workspace, &title));
+            invoke_method!(
+                invoker,
+                "finishTodoMutation",
                 payload,
                 error,
                 result_workspace,
@@ -916,6 +943,17 @@ impl Backend {
         {
             self.issue_saved(&created_id);
         }
+    }
+
+    #[qslot(qml_name = "finishTodoMutation")]
+    fn finish_todo_mutation(
+        &mut self,
+        payload: String,
+        error: String,
+        workspace: String,
+        generation: String,
+    ) {
+        let _ = self.finish_mutation(payload, error, workspace, generation, false);
     }
 
     #[qslot(qml_name = "finishDeleteIssue")]

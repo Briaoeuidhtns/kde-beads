@@ -15,6 +15,8 @@ fn main() {
     include_bytes_qml!("BeadEditorPage.qml", "qml");
     include_bytes_qml!("EditorWindow.qml", "qml");
     include_bytes_qml!("BoardPage.qml", "qml");
+    include_bytes_qml!("TodoPage.qml", "qml");
+    include_bytes_qml!("WorkspacePage.qml", "qml");
     include_bytes_qml!("ProjectDrawer.qml", "qml");
     include_bytes_qml!("components/IssueCopyButton.qml", "qml");
     include_bytes_qml!("board/CardDragProxy.qml", "qml");

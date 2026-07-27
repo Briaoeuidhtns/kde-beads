@@ -355,12 +355,13 @@ Kirigami.ApplicationWindow {
         onCollapsedPreferenceChanged: collapsed => root.rememberSidebarCollapsed(collapsed)
     }
 
-    pageStack.initialPage: BoardPage {
+    pageStack.initialPage: WorkspacePage {
         issues: Backend.issues || []
         backendLoading: Backend.loading
         backendRefreshing: Backend.refreshing
         backendErrorMessage: Backend.errorMessage
         workspace: Backend.workspace
+        onAddTodoRequested: title => Backend.addTodo(title)
         onCreateIssueRequested: root.openCreate()
         onOpenIssueRequested: issueId => root.openEditor(issueId)
         onMoveIssueRequested: (issueId, status) => Backend.moveIssue(issueId, status)

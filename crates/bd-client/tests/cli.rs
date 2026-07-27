@@ -187,6 +187,26 @@ fn creates_an_issue_with_a_non_default_status() {
 }
 
 #[test]
+fn adds_a_todo_as_an_open_task() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+
+    let todo = client.add_todo("Quick integration todo").expect("add todo");
+
+    assert_eq!(todo.title, "Quick integration todo");
+    assert_eq!(todo.issue_type, "task");
+    assert_eq!(todo.status, Status::Open);
+    assert_eq!(todo.priority, 2);
+    assert!(
+        client
+            .list()
+            .expect("list todo")
+            .iter()
+            .any(|issue| issue.id == todo.id)
+    );
+}
+
+#[test]
 fn updates_issue_fields_and_status() {
     let workspace = workspace();
     let client = Client::new(workspace.path()).expect("create client");

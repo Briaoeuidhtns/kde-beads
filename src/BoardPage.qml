@@ -72,15 +72,6 @@ Kirigami.Page {
         return closed.filter(issue => closedTimestamp(issue) >= cutoff.getTime());
     }
 
-    actions: Kirigami.Action {
-        objectName: "createTicketAction"
-        text: qsTr("Create Bead")
-        icon.name: "list-add"
-        enabled: !boardPage.backendLoading
-        shortcut: "Ctrl+N"
-        onTriggered: boardPage.createIssueRequested()
-    }
-
     Controls.ProgressBar {
         objectName: "boardProgress"
         anchors.top: parent.top

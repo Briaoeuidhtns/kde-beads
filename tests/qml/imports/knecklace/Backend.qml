@@ -19,6 +19,7 @@ QtObject {
     property int moveIssueCallCount: 0
     property int saveIssueCallCount: 0
     property int createIssueCallCount: 0
+    property int addTodoCallCount: 0
     property int deleteIssueCallCount: 0
     property int addDependencyCallCount: 0
     property int removeDependencyCallCount: 0
@@ -39,6 +40,7 @@ QtObject {
     property string lastMovedStatus: ""
     property var lastSavedRequest: ({})
     property var lastCreatedRequest: ({})
+    property string lastTodoTitle: ""
     property string lastDeletedId: ""
     property string lastDependencyIssueId: ""
     property string lastDependsOnId: ""
@@ -76,6 +78,7 @@ QtObject {
         moveIssueCallCount = 0;
         saveIssueCallCount = 0;
         createIssueCallCount = 0;
+        addTodoCallCount = 0;
         deleteIssueCallCount = 0;
         addDependencyCallCount = 0;
         removeDependencyCallCount = 0;
@@ -96,6 +99,7 @@ QtObject {
         lastMovedStatus = "";
         lastSavedRequest = {};
         lastCreatedRequest = {};
+        lastTodoTitle = "";
         lastDeletedId = "";
         lastDependencyIssueId = "";
         lastDependsOnId = "";
@@ -141,6 +145,11 @@ QtObject {
     function createIssue(request) {
         createIssueCallCount += 1;
         lastCreatedRequest = request;
+    }
+
+    function addTodo(title) {
+        addTodoCallCount += 1;
+        lastTodoTitle = title;
     }
 
     function deleteIssue(issueId) {

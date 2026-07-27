@@ -353,6 +353,73 @@ Item {
             compare(searchField.mapToItem(app.contentItem, 0, 0).y, searchY);
         }
 
+        function test_workspace_switches_between_board_and_todo_tabs() {
+            createApp([]);
+            const tabs = findChild(app, "workspaceTabs");
+            const boardTab = findChild(app, "boardTab");
+            const todoTab = findChild(app, "todoTab");
+            const board = findChild(app, "boardPage");
+            const todo = findChild(app, "todoPage");
+
+            compare(tabs.currentIndex, 0);
+            verify(board.visible);
+            verify(!todo.visible);
+
+            mouseClick(todoTab);
+            tryCompare(tabs, "currentIndex", 1);
+            verify(!board.visible);
+            verify(todo.visible);
+
+            mouseClick(boardTab);
+            tryCompare(tabs, "currentIndex", 0);
+        }
+
+        function test_todo_tab_lists_and_mutates_active_tasks() {
+            const openTask = issue("test-todo", "open");
+            const activeTask = issue("test-active", "in_progress");
+            const closedTask = issue("test-done", "closed");
+            const bug = issue("test-bug", "open");
+            bug.issue_type = "bug";
+            createApp([openTask, activeTask, closedTask, bug]);
+            mouseClick(findChild(app, "todoTab"));
+            const list = findChild(app, "todoList");
+
+            tryCompare(list, "count", 2);
+            compare(list.model[0].id, "test-active");
+            compare(list.model[1].id, "test-todo");
+            list.positionViewAtBeginning();
+            tryVerify(() => list.itemAtIndex(0) !== null);
+            tryVerify(() => list.itemAtIndex(1) !== null);
+
+            const complete = findChild(list.itemAtIndex(0), "completeTodo-test-active");
+            const start = findChild(list.itemAtIndex(1), "toggleTodoProgress-test-todo");
+            verify(complete);
+            verify(start);
+            complete.clicked();
+            compare(Backend.moveIssueCallCount, 1);
+            compare(Backend.lastMovedId, "test-active");
+            compare(Backend.lastMovedStatus, "closed");
+
+            start.clicked();
+            compare(Backend.moveIssueCallCount, 2);
+            compare(Backend.lastMovedId, "test-todo");
+            compare(Backend.lastMovedStatus, "in_progress");
+        }
+
+        function test_todo_tab_quick_adds_tasks() {
+            createApp([]);
+            mouseClick(findChild(app, "todoTab"));
+            const titleField = findChild(app, "todoTitleField");
+            const addButton = findChild(app, "addTodoButton");
+
+            titleField.text = "Follow up with design";
+            addButton.clicked();
+
+            compare(Backend.addTodoCallCount, 1);
+            compare(Backend.lastTodoTitle, "Follow up with design");
+            compare(titleField.text, "");
+        }
+
         function test_project_sidebar_becomes_modal_on_narrow_windows() {
             createApp([]);
             const sidebar = findChild(app, "projectSidebar");

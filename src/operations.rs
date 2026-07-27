@@ -74,6 +74,13 @@ pub(crate) fn create_issue_and_list(
     mutate_and_list(workspace, |client| client.create(issue))
 }
 
+pub(crate) fn add_todo_and_list(
+    workspace: String,
+    title: &str,
+) -> Result<MutationResult, bd_client::Error> {
+    mutate_and_list(workspace, |client| client.add_todo(title))
+}
+
 pub(crate) fn delete_issue_and_list(
     workspace: String,
     id: &str,

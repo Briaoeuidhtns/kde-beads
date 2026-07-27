@@ -371,6 +371,14 @@ impl Client {
         }
     }
 
+    pub fn add_todo(&self, title: &str) -> Result<Issue, Error> {
+        let payload = self.run(false, &["todo", "add", title, "--json"])?;
+        serde_json::from_str(&payload).map_err(|source| Error::InvalidJson {
+            operation: "todo add",
+            source,
+        })
+    }
+
     pub fn set_status(&self, id: &str, status: Status) -> Result<Issue, Error> {
         let payload = self.run(
             false,
