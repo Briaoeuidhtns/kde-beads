@@ -168,6 +168,7 @@ Item {
             createApp([issue("test-drag", "open")]);
             const sourceList = findChild(app, "cardList-open");
             const destination = findChild(app, "statusColumn-in_progress");
+            const destinationList = findChild(app, "cardList-in_progress");
             verify(sourceList);
             verify(destination);
             wait(300);
@@ -202,7 +203,47 @@ Item {
             tryCompare(Backend, "moveIssueCallCount", 1);
             compare(Backend.lastMovedId, "test-drag");
             compare(Backend.lastMovedStatus, "in_progress");
+            tryCompare(sourceList, "count", 0);
+            tryCompare(destinationList, "count", 1);
+            destinationList.positionViewAtBeginning();
+            tryVerify(() => destinationList.itemAtIndex(0) !== null);
+            const pending = findChild(
+                destinationList.itemAtIndex(0),
+                "pendingIssue-test-drag"
+            );
+            verify(pending);
+            verify(pending.visible);
             compare(sourceList.clip, true);
+        }
+
+        function test_failed_optimistic_move_restores_original_column() {
+            createApp([issue("test-rollback", "open")]);
+            const openList = findChild(app, "cardList-open");
+            const progressList = findChild(app, "cardList-in_progress");
+
+            Backend.moveIssue("test-rollback", "in_progress");
+            tryCompare(openList, "count", 0);
+            tryCompare(progressList, "count", 1);
+
+            Backend.finishMove("test-rollback", false);
+            tryCompare(openList, "count", 1);
+            tryCompare(progressList, "count", 0);
+            compare(openList.model[0]._pending, undefined);
+        }
+
+        function test_only_optimistically_moved_card_is_pending() {
+            createApp([
+                issue("test-pending", "open"),
+                issue("test-stable", "in_progress")
+            ]);
+
+            Backend.moveIssue("test-pending", "in_progress");
+            const list = findChild(app, "cardList-in_progress");
+            tryCompare(list, "count", 2);
+            const pendingIssue = list.model.find(issue => issue.id === "test-pending");
+            const stableIssue = list.model.find(issue => issue.id === "test-stable");
+            compare(pendingIssue._pending, true);
+            compare(stableIssue._pending, undefined);
         }
 
         function test_scrolled_cards_stay_inside_list_and_scrollbar_gutter() {

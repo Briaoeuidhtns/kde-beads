@@ -14,6 +14,7 @@ Kirigami.ApplicationWindow {
     required property var backend
     required property var clipboard
     required property var activeEditor
+    required property string workspace
     property alias issueId: editor.issueId
     property alias creating: editor.creating
     property alias parentId: editor.parentId
@@ -80,6 +81,7 @@ Kirigami.ApplicationWindow {
         backend: editorWindow.backend
         clipboard: editorWindow.clipboard
         selected: editorWindow.activeEditor === editor
+        workspace: editorWindow.workspace
         onCloseRequested: editorWindow.requestClose()
         onCreateChildRequested: parentId => editorWindow.createChildRequested(parentId)
         onDeleteRequested: deleteIssueDialog.open()

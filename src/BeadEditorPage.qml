@@ -16,6 +16,7 @@ Kirigami.ScrollablePage {
     required property var backend
     required property var clipboard
     required property bool selected
+    required property string workspace
 
     signal closeRequested()
     signal createChildRequested(string parentId)
@@ -34,6 +35,9 @@ Kirigami.ScrollablePage {
     property bool refreshWhenCurrent: false
     property bool hydratingCreatedIssue: false
     property bool closeAfterSave: false
+    property bool savePending: false
+    property string pendingSaveGeneration: ""
+    property string submittedFormState: ""
     property string cleanFormState: ""
     property var localDetail: ({})
     property var attachmentPreviews: ({})
@@ -56,6 +60,7 @@ Kirigami.ScrollablePage {
             && selected
     )
     readonly property bool canSave: !backend.loading
+        && !savePending
         && titleField.text.trim().length > 0
         && (creating || detailReady)
     readonly property bool dirty: cleanFormState.length > 0
@@ -163,6 +168,18 @@ Kirigami.ScrollablePage {
 
     function markClean() {
         cleanFormState = JSON.stringify(formValues());
+    }
+
+    function applyExternalStatus(status) {
+        if (!status)
+            return;
+        localDetail = Object.assign({}, localDetail, { "status": status });
+        statusField.currentIndex = statusIndex(status);
+        if (cleanFormState.length > 0) {
+            const clean = JSON.parse(cleanFormState);
+            clean.status = status;
+            cleanFormState = JSON.stringify(clean);
+        }
     }
 
     function populate() {
@@ -405,15 +422,17 @@ Kirigami.ScrollablePage {
     }
 
     function save(closeWhenFinished) {
-        if (backend.loading || titleField.text.trim().length === 0)
+        if (backend.loading || savePending || titleField.text.trim().length === 0)
             return false;
         closeAfterSave = Boolean(closeWhenFinished);
-        preserveFieldsWhileLoading = true;
         const request = formValues();
-        if (creating)
+        if (creating) {
+            preserveFieldsWhileLoading = true;
             editor.backend.createIssue(request);
-        else
+        } else {
+            submittedFormState = JSON.stringify(request);
             editor.backend.saveIssue(request);
+        }
         return true;
     }
 
@@ -492,6 +511,38 @@ Kirigami.ScrollablePage {
             editor.attachmentPreviews = previews;
         }
 
+        function onIssueProjectionChanged(workspace, issueId, status, pending) {
+            if (workspace === editor.workspace && issueId === editor.issueId)
+                editor.applyExternalStatus(status);
+        }
+
+        function onIssueSaveStarted(workspace, issueId, generation) {
+            if (workspace !== editor.workspace || issueId !== editor.issueId)
+                return;
+            editor.pendingSaveGeneration = generation;
+            editor.savePending = true;
+        }
+
+        function onIssueSaveFinished(workspace, issueId, generation, succeeded) {
+            if (workspace !== editor.workspace
+                    || issueId !== editor.issueId
+                    || generation !== editor.pendingSaveGeneration) {
+                return;
+            }
+            editor.savePending = false;
+            editor.pendingSaveGeneration = "";
+            if (succeeded) {
+                editor.cleanFormState = editor.submittedFormState;
+                if (editor.closeAfterSave && !editor.dirty) {
+                    editor.closeAfterSave = false;
+                    editor.closeRequested();
+                }
+            } else {
+                editor.closeAfterSave = false;
+            }
+            editor.submittedFormState = "";
+        }
+
         function onDetailChanged() {
             if (String(editor.backend.detail.id || "") !== editor.issueId)
                 return;
@@ -538,10 +589,6 @@ Kirigami.ScrollablePage {
                 }
                 editor.hydratingCreatedIssue = true;
                 editor.requestDetail();
-            } else if (savedId === editor.issueId) {
-                editor.markClean();
-                editor.closeAfterSave = false;
-                editor.closeRequested();
             } else if (editor.isCurrent) {
                 editor.backend.loadIssue(editor.issueId);
             } else {
@@ -662,7 +709,7 @@ Kirigami.ScrollablePage {
             }
             Item { Layout.fillWidth: true }
             Controls.BusyIndicator {
-                running: editor.backend.loading
+                running: editor.backend.loading || editor.savePending
                 visible: running
                 implicitWidth: Kirigami.Units.iconSizes.smallMedium
                 implicitHeight: implicitWidth

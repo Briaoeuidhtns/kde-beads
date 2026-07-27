@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread;
 
-use bd_client::{Issue, Status};
+use bd_client::{Issue, IssueUpdate, Status};
 use qtbridge::{QObjectHolder, invoke_method, qobject};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::dialogs::{choose_attachment_with_kdialog, choose_workspace_with_kdialog};
 use crate::editor_request::{
@@ -18,10 +18,10 @@ use crate::operations::{
     add_attachments_to_issue, add_comment_and_list, add_dependency_and_list, add_todo_and_list,
     canonical_workspace, create_gate_and_list, create_issue_and_list, delete_issue_and_list,
     encode_result, list_issues, load_issue_detail, materialize_attachment, migrate_attachments,
-    move_issue_and_list, remove_attachment_from_issue, remove_dependency_and_list,
-    remove_gate_and_list, resolve_gate_and_list, update_issue_and_list,
+    move_issue, remove_attachment_from_issue, remove_dependency_and_list, remove_gate_and_list,
+    resolve_gate_and_list, update_issue,
 };
-use crate::workspace_cache::WorkspaceCache;
+use crate::workspace_cache::{OptimisticKind, WorkspaceCache};
 
 #[derive(Clone)]
 struct RequestTarget {
@@ -33,6 +33,41 @@ struct RequestTarget {
 struct PreviewRequest {
     target: RequestTarget,
     attachment_id: String,
+}
+
+#[derive(Clone)]
+enum OptimisticMutation {
+    Move { id: String, status: Status },
+    Save { update: IssueUpdate },
+}
+
+impl OptimisticMutation {
+    fn issue_id(&self) -> &str {
+        match self {
+            Self::Move { id, .. } => id,
+            Self::Save { update } => &update.id,
+        }
+    }
+
+    fn kind(&self) -> OptimisticKind {
+        match self {
+            Self::Move { .. } => OptimisticKind::Move,
+            Self::Save { .. } => OptimisticKind::Save,
+        }
+    }
+
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Move { .. } => "move",
+            Self::Save { .. } => "save",
+        }
+    }
+}
+
+#[derive(Clone)]
+struct PendingMutation {
+    generation: u64,
+    mutation: OptimisticMutation,
 }
 
 pub(crate) struct Backend {
@@ -48,6 +83,8 @@ pub(crate) struct Backend {
     preview_requests: HashMap<u64, PreviewRequest>,
     workspace_choice: Option<(String, u64)>,
     preview_paths: Vec<PreviewPath>,
+    mutation_queues: HashMap<String, VecDeque<PendingMutation>>,
+    active_mutations: HashMap<String, u64>,
 }
 
 impl Default for Backend {
@@ -66,6 +103,8 @@ impl Default for Backend {
             preview_requests: HashMap::new(),
             workspace_choice: None,
             preview_paths: Vec::new(),
+            mutation_queues: HashMap::new(),
+            active_mutations: HashMap::new(),
         }
     }
 }
@@ -115,6 +154,27 @@ impl Backend {
 
     #[qsignal(qml_name = "issueDeleted")]
     fn issue_deleted(&mut self, id: &String);
+
+    #[qsignal(qml_name = "issueProjectionChanged")]
+    fn issue_projection_changed(
+        &mut self,
+        workspace: &String,
+        issue_id: &String,
+        status: &String,
+        pending: bool,
+    );
+
+    #[qsignal(qml_name = "issueSaveStarted")]
+    fn issue_save_started(&mut self, workspace: &String, issue_id: &String, generation: &String);
+
+    #[qsignal(qml_name = "issueSaveFinished")]
+    fn issue_save_finished(
+        &mut self,
+        workspace: &String,
+        issue_id: &String,
+        generation: &String,
+        succeeded: bool,
+    );
 
     #[qsignal(qml_name = "workspaceChosen")]
     fn workspace_chosen(&mut self, path: &String);
@@ -194,24 +254,36 @@ impl Backend {
                 return;
             }
         };
-        let Some((workspace, generation)) = self.begin_foreground(true) else {
+        let workspace = self.workspace.clone();
+        let generation = self.cache.allocate_generation();
+        let mut patch = Map::new();
+        patch.insert("status".to_string(), Value::String(status.to_string()));
+        if !self.cache.begin_optimistic_update(
+            &workspace,
+            &id,
+            generation,
+            OptimisticKind::Move,
+            patch,
+        ) {
+            self.set_error(format!(
+                "Could not move bead {id}: it is not in the active workspace"
+            ));
             return;
-        };
-
-        let result_workspace = workspace.clone();
-        let generation = generation.to_string();
-        let invoker = self.get_qml_method_invoker();
-        thread::spawn(move || {
-            let (payload, error) = encode_result(move_issue_and_list(workspace, &id, status));
-            invoke_method!(
-                invoker,
-                "finishMoveIssue",
-                payload,
-                error,
-                result_workspace,
-                generation
-            );
-        });
+        }
+        self.cache.set_error(&workspace, generation, String::new());
+        self.mutation_queues
+            .entry(workspace.clone())
+            .or_default()
+            .push_back(PendingMutation {
+                generation,
+                mutation: OptimisticMutation::Move {
+                    id: id.clone(),
+                    status,
+                },
+            });
+        self.publish_active_workspace();
+        self.emit_issue_projection(&workspace, &id);
+        self.start_next_optimistic_mutation(workspace);
     }
 
     #[qslot]
@@ -223,26 +295,34 @@ impl Backend {
                 return;
             }
         };
-        let Some((workspace, generation)) = self.begin_foreground(true) else {
+        let workspace = self.workspace.clone();
+        let generation = self.cache.allocate_generation();
+        if !self.cache.begin_optimistic_update(
+            &workspace,
+            &update.id,
+            generation,
+            OptimisticKind::Save,
+            issue_update_patch(&update),
+        ) {
+            self.set_error(format!(
+                "Could not save bead {}: it is not in the active workspace",
+                update.id
+            ));
             return;
-        };
-
-        let saved_id = update.id.clone();
-        let result_workspace = workspace.clone();
-        let generation = generation.to_string();
-        let invoker = self.get_qml_method_invoker();
-        thread::spawn(move || {
-            let (payload, error) = encode_result(update_issue_and_list(workspace, &update));
-            invoke_method!(
-                invoker,
-                "finishSaveIssue",
-                payload,
-                error,
-                result_workspace,
+        }
+        self.cache.set_error(&workspace, generation, String::new());
+        let issue_id = update.id.clone();
+        self.mutation_queues
+            .entry(workspace.clone())
+            .or_default()
+            .push_back(PendingMutation {
                 generation,
-                saved_id
-            );
-        });
+                mutation: OptimisticMutation::Save { update },
+            });
+        self.publish_active_workspace();
+        self.emit_issue_projection(&workspace, &issue_id);
+        self.issue_save_started(&workspace, &issue_id, &generation.to_string());
+        self.start_next_optimistic_mutation(workspace);
     }
 
     #[qslot]
@@ -906,28 +986,85 @@ impl Backend {
         self.complete_foreground(&workspace, generation);
     }
 
-    #[qslot(qml_name = "finishMoveIssue")]
-    fn finish_move_issue(
+    #[qslot(qml_name = "finishOptimisticMutation")]
+    fn finish_optimistic_mutation(
         &mut self,
         payload: String,
         error: String,
         workspace: String,
         generation: String,
+        issue_id: String,
     ) {
-        let _ = self.finish_mutation(payload, error, workspace, generation, false);
-    }
+        let Some(generation) = parse_generation(&generation) else {
+            return;
+        };
+        if self.active_mutations.get(&workspace) != Some(&generation) {
+            return;
+        }
+        let Some(pending) = self
+            .mutation_queues
+            .get(&workspace)
+            .and_then(|queue| queue.front())
+            .filter(|pending| {
+                pending.generation == generation && pending.mutation.issue_id() == issue_id
+            })
+            .cloned()
+        else {
+            return;
+        };
 
-    #[qslot(qml_name = "finishSaveIssue")]
-    fn finish_save_issue(
-        &mut self,
-        payload: String,
-        error: String,
-        workspace: String,
-        generation: String,
-        _saved_id: String,
-    ) {
-        if let Some(saved_id) = self.finish_mutation(payload, error, workspace, generation, true) {
-            self.issue_saved(&saved_id);
+        let mut failure = (!error.is_empty()).then_some(error);
+        let succeeded = if failure.is_none() {
+            match serde_json::from_str::<Issue>(&payload).and_then(serde_json::to_value) {
+                Ok(issue) if issue.get("id").and_then(Value::as_str) == Some(issue_id.as_str()) => {
+                    self.cache
+                        .commit_optimistic_update(&workspace, &issue_id, generation, issue)
+                }
+                Ok(_) => {
+                    failure = Some("the persisted bead ID did not match the request".to_string());
+                    false
+                }
+                Err(error) => {
+                    failure = Some(format!("could not decode the persisted bead: {error}"));
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        if !succeeded {
+            self.cache
+                .fail_optimistic_update(&workspace, &issue_id, generation);
+            let error_generation = self.cache.allocate_generation();
+            self.cache.set_error(
+                &workspace,
+                error_generation,
+                format!(
+                    "Could not {} bead {}: {}",
+                    pending.mutation.action(),
+                    issue_id,
+                    failure.unwrap_or_else(|| "the update could not be reconciled".to_string())
+                ),
+            );
+        }
+
+        self.active_mutations.remove(&workspace);
+        if let Some(queue) = self.mutation_queues.get_mut(&workspace) {
+            queue.pop_front();
+            if queue.is_empty() {
+                self.mutation_queues.remove(&workspace);
+            }
+        }
+        self.publish_active_workspace();
+        self.emit_issue_projection(&workspace, &issue_id);
+        if pending.mutation.kind() == OptimisticKind::Save {
+            self.issue_save_finished(&workspace, &issue_id, &generation.to_string(), succeeded);
+        }
+        if self.mutation_queues.contains_key(&workspace) {
+            self.start_next_optimistic_mutation(workspace);
+        } else {
+            let report_errors = self.cache.take_pending_refresh(&workspace).unwrap_or(false);
+            self.start_workspace_refresh(workspace, report_errors);
         }
     }
 
@@ -1361,6 +1498,64 @@ impl Backend {
         is_active.then_some(issue_id)
     }
 
+    fn start_next_optimistic_mutation(&mut self, workspace: String) {
+        if self.active_mutations.contains_key(&workspace) {
+            return;
+        }
+        let Some(pending) = self
+            .mutation_queues
+            .get(&workspace)
+            .and_then(|queue| queue.front())
+            .cloned()
+        else {
+            return;
+        };
+        self.active_mutations
+            .insert(workspace.clone(), pending.generation);
+
+        let result_workspace = workspace.clone();
+        let issue_id = pending.mutation.issue_id().to_string();
+        let generation = pending.generation.to_string();
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = match pending.mutation {
+                OptimisticMutation::Move { id, status } => move_issue(workspace, &id, status),
+                OptimisticMutation::Save { update } => update_issue(workspace, &update),
+            };
+            let (payload, error) = encode_result(result);
+            invoke_method!(
+                invoker,
+                "finishOptimisticMutation",
+                payload,
+                error,
+                result_workspace,
+                generation,
+                issue_id
+            );
+        });
+    }
+
+    fn emit_issue_projection(&mut self, workspace: &str, issue_id: &str) {
+        let Some(issue) = self.cache.projected_issue(workspace, issue_id) else {
+            return;
+        };
+        let status = issue
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let pending = issue
+            .get("_pending")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        self.issue_projection_changed(
+            &workspace.to_string(),
+            &issue_id.to_string(),
+            &status,
+            pending,
+        );
+    }
+
     fn start_refresh(&mut self, report_errors: bool) {
         self.start_workspace_refresh(self.workspace.clone(), report_errors);
     }
@@ -1470,6 +1665,24 @@ impl Backend {
             self.refreshing_changed();
         }
     }
+}
+
+fn issue_update_patch(update: &IssueUpdate) -> Map<String, Value> {
+    Map::from_iter([
+        ("title".to_string(), json!(update.title)),
+        ("description".to_string(), json!(update.description)),
+        (
+            "acceptance_criteria".to_string(),
+            json!(update.acceptance_criteria),
+        ),
+        ("design".to_string(), json!(update.design)),
+        ("notes".to_string(), json!(update.notes)),
+        ("status".to_string(), json!(update.status.to_string())),
+        ("priority".to_string(), json!(update.priority)),
+        ("issue_type".to_string(), json!(update.issue_type)),
+        ("assignee".to_string(), json!(update.assignee)),
+        ("labels".to_string(), json!(update.labels)),
+    ])
 }
 
 fn parse_generation(generation: &str) -> Option<u64> {

@@ -199,14 +199,115 @@ Item {
 
             titleField.text = "Retry this title";
             editor.save();
-            compare(editor.preserveFieldsWhileLoading, true);
-            Backend.loading = true;
+            compare(editor.savePending, true);
+            compare(findChild(editor, "editorForm").enabled, true);
             Backend.errorMessage = "Save failed";
-            Backend.loading = false;
+            Backend.finishSave("test-dirty", "1", false);
 
             compare(titleField.text, "Retry this title");
             compare(editor.dirty, true);
-            compare(editor.preserveFieldsWhileLoading, false);
+            compare(editor.savePending, false);
+        }
+
+        function test_board_move_updates_editor_status_without_losing_dirty_fields() {
+            Backend.issues = [issue("test-moved", "open")];
+            Backend.detail = {
+                "id": "test-moved",
+                "title": "Original title",
+                "description": "Original description",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-moved");
+            const editor = findChild(app, "editorPage");
+            const titleField = findChild(editor, "titleField");
+            const statusField = findChild(editor, "statusField");
+            editor.detailReady = true;
+            titleField.text = "Unsaved title";
+
+            Backend.moveIssue("test-moved", "in_progress");
+
+            compare(statusField.currentValue, "in_progress");
+            compare(titleField.text, "Unsaved title");
+            compare(editor.dirty, true);
+            Backend.finishMove("test-moved", false);
+            compare(statusField.currentValue, "open");
+            compare(titleField.text, "Unsaved title");
+            compare(editor.dirty, true);
+        }
+
+        function test_external_status_change_is_scoped_to_workspace_and_issue() {
+            Backend.issues = [issue("test-scoped", "open")];
+            Backend.detail = {
+                "id": "test-scoped",
+                "title": "Scoped issue",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-scoped");
+            const editor = findChild(app, "editorPage");
+            const statusField = findChild(editor, "statusField");
+            editor.detailReady = true;
+
+            Backend.issueProjectionChanged(
+                "/tmp/another-workspace",
+                "test-scoped",
+                "closed",
+                true
+            );
+            Backend.issueProjectionChanged(
+                Backend.workspace,
+                "another-issue",
+                "closed",
+                true
+            );
+
+            compare(statusField.currentValue, "open");
+            compare(editor.dirty, false);
+        }
+
+        function test_save_success_keeps_newer_editor_changes_dirty() {
+            Backend.issues = [issue("test-save-newer", "open")];
+            Backend.detail = {
+                "id": "test-save-newer",
+                "title": "Original title",
+                "status": "open",
+                "priority": 2,
+                "issue_type": "task",
+                "labels": [],
+                "attachments": [],
+                "dependencies": [],
+                "dependents": [],
+                "comments": []
+            };
+            createApp();
+            app.openEditor("test-save-newer");
+            const editor = findChild(app, "editorPage");
+            const titleField = findChild(editor, "titleField");
+            editor.detailReady = true;
+            titleField.text = "Submitted title";
+            editor.save();
+            titleField.text = "Newer local title";
+
+            Backend.finishSave("test-save-newer", "1", true);
+
+            compare(editor.savePending, false);
+            compare(titleField.text, "Newer local title");
+            compare(editor.dirty, true);
         }
 
         function test_legacy_blocked_status_is_preserved_on_save() {

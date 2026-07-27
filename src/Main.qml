@@ -172,8 +172,11 @@ Kirigami.ApplicationWindow {
     function editorForIssue(issueId) {
         const id = String(issueId || "");
         for (const editor of editorPages) {
-            if (!editor.creating && String(editor.issueId) === id)
+            if (!editor.creating
+                    && editor.workspace === Backend.workspace
+                    && String(editor.issueId) === id) {
                 return editor;
+            }
         }
         return null;
     }
@@ -216,7 +219,10 @@ Kirigami.ApplicationWindow {
         }
         if (Backend.loading)
             return;
-        editorWindowComponent.createObject(root, { "issueId": issueId });
+        editorWindowComponent.createObject(root, {
+            "issueId": issueId,
+            "workspace": Backend.workspace
+        });
     }
 
     function openCreate(parentId) {
@@ -224,7 +230,8 @@ Kirigami.ApplicationWindow {
             return;
         editorWindowComponent.createObject(root, {
             "creating": true,
-            "parentId": String(parentId || "")
+            "parentId": String(parentId || ""),
+            "workspace": Backend.workspace
         });
     }
 

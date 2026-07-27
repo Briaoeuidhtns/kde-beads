@@ -165,6 +165,14 @@ Rectangle {
                             z: 2
                             onCopyRequested: issueId => column.copyIssueIdRequested(issueId)
                         }
+                        Controls.BusyIndicator {
+                            objectName: `pendingIssue-${card.issueId}`
+                            running: Boolean(card.modelData._pending)
+                            visible: running
+                            implicitWidth: Kirigami.Units.iconSizes.small
+                            implicitHeight: implicitWidth
+                            Accessible.name: qsTr("Saving changes for %1").arg(card.issueId)
+                        }
                         Kirigami.Icon {
                             id: gateBlockedIcon
                             objectName: `gateBlockedIcon-${card.issueId}`

@@ -57,9 +57,14 @@ QtObject {
     property string lastAttachmentId: ""
     property var lastAttachmentUrls: []
     property string lastSwitchedWorkspace: ""
+    property int nextMutationGeneration: 0
+    property var pendingOriginalStatuses: ({})
 
     signal issueSaved(string savedId)
     signal issueDeleted(string deletedId)
+    signal issueProjectionChanged(string workspace, string issueId, string status, bool pending)
+    signal issueSaveStarted(string workspace, string issueId, string generation)
+    signal issueSaveFinished(string workspace, string issueId, string generation, bool succeeded)
     signal workspaceChosen(string path)
     signal attachmentReady(string issueId, string path)
     signal attachmentPreviewReady(string issueId, string attachmentId, string path)
@@ -116,6 +121,8 @@ QtObject {
         lastAttachmentId = "";
         lastAttachmentUrls = [];
         lastSwitchedWorkspace = "";
+        nextMutationGeneration = 0;
+        pendingOriginalStatuses = {};
     }
 
     function reload() {
@@ -135,11 +142,75 @@ QtObject {
         moveIssueCallCount += 1;
         lastMovedId = issueId;
         lastMovedStatus = status;
+        const originals = Object.assign({}, pendingOriginalStatuses);
+        const current = issues.find(issue => issue.id === issueId);
+        if (current && !Object.prototype.hasOwnProperty.call(originals, issueId))
+            originals[issueId] = current.status;
+        pendingOriginalStatuses = originals;
+        issues = issues.map(issue => issue.id === issueId
+            ? Object.assign({}, issue, {
+                "status": status,
+                "_pending": true,
+                "_pending_move": true
+            })
+            : issue);
+        issueProjectionChanged(workspace, issueId, status, true);
     }
 
     function saveIssue(request) {
         saveIssueCallCount += 1;
         lastSavedRequest = request;
+        nextMutationGeneration += 1;
+        const generation = String(nextMutationGeneration);
+        issues = issues.map(issue => issue.id === request.id
+            ? Object.assign({}, issue, {
+                "title": request.title,
+                "status": request.status,
+                "priority": Number(request.priority),
+                "issue_type": request.issueType,
+                "assignee": request.assignee,
+                "labels": request.labels
+                    ? request.labels.split(",").map(label => label.trim()).filter(Boolean)
+                    : [],
+                "_pending": true,
+                "_pending_save": true
+            })
+            : issue);
+        issueProjectionChanged(workspace, request.id, request.status, true);
+        issueSaveStarted(workspace, request.id, generation);
+    }
+
+    function finishMove(issueId, succeeded) {
+        const original = pendingOriginalStatuses[issueId];
+        let status = "";
+        issues = issues.map(issue => {
+            if (issue.id !== issueId)
+                return issue;
+            status = succeeded ? issue.status : original;
+            const updated = Object.assign({}, issue, { "status": status });
+            delete updated._pending;
+            delete updated._pending_move;
+            return updated;
+        });
+        const originals = Object.assign({}, pendingOriginalStatuses);
+        delete originals[issueId];
+        pendingOriginalStatuses = originals;
+        issueProjectionChanged(workspace, issueId, status, false);
+    }
+
+    function finishSave(issueId, generation, succeeded) {
+        let status = "";
+        issues = issues.map(issue => {
+            if (issue.id !== issueId)
+                return issue;
+            status = issue.status;
+            const updated = Object.assign({}, issue);
+            delete updated._pending;
+            delete updated._pending_save;
+            return updated;
+        });
+        issueProjectionChanged(workspace, issueId, status, false);
+        issueSaveFinished(workspace, issueId, String(generation), succeeded);
     }
 
     function createIssue(request) {

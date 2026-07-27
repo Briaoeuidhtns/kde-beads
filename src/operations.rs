@@ -52,19 +52,19 @@ pub(crate) fn load_issue_detail(
     load_issue_detail_with_client(&client, id)
 }
 
-pub(crate) fn move_issue_and_list(
+pub(crate) fn move_issue(
     workspace: String,
     id: &str,
     status: Status,
-) -> Result<MutationResult, bd_client::Error> {
-    mutate_and_list(workspace, |client| client.set_status(id, status))
+) -> Result<Issue, bd_client::Error> {
+    Client::new(workspace)?.set_status(id, status)
 }
 
-pub(crate) fn update_issue_and_list(
+pub(crate) fn update_issue(
     workspace: String,
     update: &IssueUpdate,
-) -> Result<MutationResult, bd_client::Error> {
-    mutate_and_list(workspace, |client| client.update(update))
+) -> Result<Issue, bd_client::Error> {
+    Client::new(workspace)?.update(update)
 }
 
 pub(crate) fn create_issue_and_list(

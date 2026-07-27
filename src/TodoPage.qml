@@ -214,6 +214,13 @@ Kirigami.Page {
                                 : "in_progress"
                         )
                     }
+                    Controls.BusyIndicator {
+                        running: Boolean(todoRow.modelData._pending)
+                        visible: running
+                        implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                        implicitHeight: implicitWidth
+                        Accessible.name: qsTr("Saving changes for %1").arg(todoRow.issueId)
+                    }
                     Components.IssueCopyButton {
                         issueId: todoRow.issueId
                         onCopyRequested: issueId => todoPage.copyIssueIdRequested(issueId)
