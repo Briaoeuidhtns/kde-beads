@@ -2,11 +2,33 @@
   description = "A native KDE viewer for Beads";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.beads = {
+    url = "github:gastownhall/beads/v1.3.0";
+    flake = false;
+  };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, ... }@inputs:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [
+          (final: _: {
+            # 1.0.x queries depends_on_id, removed by newer Beads schemas.
+            beads = final.symlinkJoin {
+              name = "beads-1.3.0";
+              paths = [ (final.callPackage "${inputs.beads}/default.nix" {
+                self = inputs.beads;
+                buildGoModule = final.buildGo126Module;
+              }) ];
+              nativeBuildInputs = [ final.makeWrapper ];
+              postBuild = ''
+                wrapProgram $out/bin/bd --prefix PATH : ${lib.makeBinPath [ final.dolt ]}
+              '';
+            };
+          })
+        ];
+      };
       inherit (pkgs) lib;
       qtdeclarative = pkgs.kdePackages.qtdeclarative;
       qtNativeBuildInputs = with pkgs; [

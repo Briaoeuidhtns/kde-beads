@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "beads": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789499639,
+        "narHash": "sha256-QryUnK04c9Wm9/VgWoaOJW9M2HoZVZzSDMSMBtjKiyc=",
+        "owner": "gastownhall",
+        "repo": "beads",
+        "rev": "f45b249ce6b40ba62aecc03949e6371e8f7c79d8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gastownhall",
+        "ref": "v1.3.0",
+        "repo": "beads",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1784497964,
@@ -18,6 +35,7 @@
     },
     "root": {
       "inputs": {
+        "beads": "beads",
         "nixpkgs": "nixpkgs"
       }
     }
