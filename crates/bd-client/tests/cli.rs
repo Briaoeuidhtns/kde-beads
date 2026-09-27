@@ -239,6 +239,95 @@ fn updates_issue_fields_and_status() {
 }
 
 #[test]
+fn event_tail_replays_changes_after_a_snapshot_checkpoint() {
+    let workspace = workspace();
+    let client = Client::new(workspace.path()).expect("create client");
+    let disabled = client.events_head();
+    assert!(
+        matches!(disabled, Err(Error::EventsDisabled)),
+        "{disabled:?}"
+    );
+
+    let enabled = Command::new("bd")
+        .args(["config", "set", "events-journal", "true"])
+        .current_dir(workspace.path())
+        .output()
+        .expect("enable events journal");
+    assert!(
+        enabled.status.success(),
+        "enable journal failed: {}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+
+    let checkpoint = client.events_head().expect("read initial checkpoint");
+    let created = client
+        .create(&new_issue("After checkpoint", Status::Open))
+        .expect("create issue after checkpoint");
+    let mut tail = client.events_tail(checkpoint).expect("follow journal");
+    let event = tail
+        .next_event()
+        .expect("read event")
+        .expect("create event");
+    assert_eq!(event.op, "create");
+    assert_eq!(event.issue_id, created.id);
+    assert_eq!(
+        event.issue.expect("full issue snapshot").title,
+        created.title
+    );
+    assert!(event.seq > checkpoint);
+}
+
+#[test]
+fn gate_mutations_publish_gate_and_blocked_issue_changes() {
+    let workspace = workspace();
+    let enabled = Command::new("bd")
+        .args(["config", "set", "events-journal", "true"])
+        .current_dir(workspace.path())
+        .output()
+        .expect("enable events journal");
+    assert!(enabled.status.success());
+    let client = Client::new(workspace.path()).expect("create client");
+    let issue = client
+        .create(&new_issue("Blocked by human gate", Status::Open))
+        .expect("create blocked issue");
+    let checkpoint = client.events_head().expect("checkpoint before gate");
+    let gate = client
+        .create_gate(&issue.id, "human", "Review required", "")
+        .expect("create gate");
+    let head = client.events_head().expect("checkpoint after gate");
+    let mut tail = client.events_tail(checkpoint).expect("follow gate changes");
+    let mut saw_gate = false;
+    let mut saw_blocked = false;
+    let mut saw_edge = false;
+    let mut seq = checkpoint;
+    while seq < head {
+        let event = tail.next_event().expect("read event").expect("gate event");
+        seq = event.seq;
+        if event.issue_id == gate.id
+            && event
+                .issue
+                .as_ref()
+                .is_some_and(|issue| issue.issue_type == "gate")
+        {
+            saw_gate = true;
+        }
+        if event.issue_id == issue.id && event.issue.as_ref().is_some_and(|issue| issue.is_blocked)
+        {
+            saw_blocked = true;
+        }
+        if event.op == "dep_add"
+            && event.issue_id == issue.id
+            && event.dep.as_ref().is_some_and(|dep| dep.target == gate.id)
+        {
+            saw_edge = true;
+        }
+    }
+    assert!(saw_gate, "gate bead was not journaled");
+    assert!(saw_blocked, "blocked state was not journaled");
+    assert!(saw_edge, "gate dependency was not journaled");
+}
+
+#[test]
 fn lists_dependency_blocking_separately_from_stored_status() {
     let workspace = workspace();
     let client = Client::new(workspace.path()).expect("create client");

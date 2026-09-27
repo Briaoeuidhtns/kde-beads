@@ -27,6 +27,9 @@ struct WorkspaceState {
     pending_refresh_report_errors: Option<bool>,
     foreground_generation: Option<u64>,
     optimistic_updates: HashMap<String, Vec<OptimisticUpdate>>,
+    // Journal changes received after an in-flight snapshot started must win when it returns.
+    // Keep changes to optimistic issues until their mutation has completed as well.
+    event_overrides: HashMap<String, Option<Value>>,
 }
 
 #[derive(Clone, Copy)]
@@ -96,6 +99,7 @@ impl WorkspaceCache {
             return false;
         }
         state.refresh = None;
+        prune_event_overrides(state);
         true
     }
 
@@ -146,6 +150,7 @@ impl WorkspaceCache {
             return false;
         }
         state.foreground_generation = None;
+        prune_event_overrides(state);
         true
     }
 
@@ -162,6 +167,10 @@ impl WorkspaceCache {
             return false;
         }
         if state.optimistic_updates.is_empty() || state.issues.is_none() {
+            let mut issues = issues;
+            for (id, issue) in &state.event_overrides {
+                replace_issue(&mut issues, id, issue.clone());
+            }
             state.issues = Some(issues);
             return true;
         }
@@ -193,7 +202,59 @@ impl WorkspaceCache {
                 merged.push(issue);
             }
         }
+        for (id, issue) in &state.event_overrides {
+            replace_issue(&mut merged, id, issue.clone());
+        }
         state.issues = Some(merged);
+        true
+    }
+
+    /// Apply a journal issue change without invalidating a foreground mutation's generation.
+    /// Returns false if the issue is malformed or there is no snapshot to update yet.
+    pub(crate) fn apply_event(
+        &mut self,
+        workspace: &str,
+        issue_id: &str,
+        mut issue: Option<Value>,
+    ) -> bool {
+        if let Some(value) = issue.as_mut() {
+            if value.get("id").and_then(Value::as_str) != Some(issue_id) {
+                return false;
+            }
+            let Some(object) = value.as_object_mut() else {
+                return false;
+            };
+            object
+                .entry("is_blocked".to_string())
+                .or_insert(Value::Bool(false));
+        }
+        let state = self.states.entry(workspace.to_string()).or_default();
+        if let Some(value) = issue.as_mut() {
+            if let Some(existing) = state.issues.as_ref().and_then(|issues| {
+                issues
+                    .iter()
+                    .find(|existing| existing.get("id").and_then(Value::as_str) == Some(issue_id))
+            }) {
+                if let Some(gate) = existing.get("blocked_by_gate") {
+                    value
+                        .as_object_mut()
+                        .expect("validated issue object")
+                        .insert("blocked_by_gate".to_string(), gate.clone());
+                }
+            }
+        }
+        if state.refresh.is_some()
+            || state.foreground_generation.is_some()
+            || state.optimistic_updates.contains_key(issue_id)
+        {
+            state
+                .event_overrides
+                .insert(issue_id.to_string(), issue.clone());
+        }
+        let Some(issues) = state.issues.as_mut() else {
+            return state.refresh.is_some() || state.foreground_generation.is_some();
+        };
+        replace_issue(issues, issue_id, issue);
         true
     }
 
@@ -238,19 +299,30 @@ impl WorkspaceCache {
         if !has_optimistic_generation(state, issue_id, generation) {
             return false;
         }
-        let Some(issues) = state.issues.as_mut() else {
+        if let Some(issues) = state.issues.as_mut() {
+            if let Some(issue) = issues
+                .iter_mut()
+                .find(|issue| issue.get("id").and_then(Value::as_str) == Some(issue_id))
+            {
+                preserve_derived_fields(issue, &mut updated);
+                *issue = updated;
+            } else if state.event_overrides.get(issue_id) != Some(&None) {
+                return false;
+            }
+        } else {
             return false;
-        };
-        let Some(issue) = issues
-            .iter_mut()
-            .find(|issue| issue.get("id").and_then(Value::as_str) == Some(issue_id))
-        else {
-            return false;
-        };
-        preserve_derived_fields(issue, &mut updated);
-        *issue = updated;
+        }
+        if let Some(event) = state.event_overrides.get(issue_id).cloned() {
+            replace_issue(
+                state.issues.as_mut().expect("checked above"),
+                issue_id,
+                event,
+            );
+        }
         invalidate_refresh(state, generation);
-        remove_optimistic_generation(state, issue_id, generation)
+        let removed = remove_optimistic_generation(state, issue_id, generation);
+        prune_event_overrides(state);
+        removed
     }
 
     pub(crate) fn fail_optimistic_update(
@@ -266,7 +338,9 @@ impl WorkspaceCache {
             return false;
         }
         invalidate_refresh(state, generation);
-        remove_optimistic_generation(state, issue_id, generation)
+        let removed = remove_optimistic_generation(state, issue_id, generation);
+        prune_event_overrides(state);
+        removed
     }
 
     pub(crate) fn projected_issue(&self, workspace: &str, issue_id: &str) -> Option<Value> {
@@ -294,25 +368,24 @@ impl WorkspaceCache {
         if state.latest_issue_generation != generation {
             return false;
         }
-        let Some(updated_id) = updated.get("id").and_then(Value::as_str) else {
+        let Some(updated_id) = updated.get("id").and_then(Value::as_str).map(str::to_owned) else {
             return false;
         };
         let Some(issues) = state.issues.as_mut() else {
             return false;
         };
-        let Some(issue) = issues
+        if let Some(issue) = issues
             .iter_mut()
-            .find(|issue| issue.get("id").and_then(Value::as_str) == Some(updated_id))
-        else {
-            return false;
-        };
-
-        if let (Some(is_blocked), Some(updated)) =
-            (issue.get("is_blocked").cloned(), updated.as_object_mut())
+            .find(|issue| issue.get("id").and_then(Value::as_str) == Some(&updated_id))
         {
-            updated.insert("is_blocked".to_string(), is_blocked);
+            preserve_derived_fields(issue, &mut updated);
+            *issue = updated;
+        } else if state.event_overrides.get(&updated_id) != Some(&None) {
+            return false;
         }
-        *issue = updated;
+        if let Some(event) = state.event_overrides.get(&updated_id).cloned() {
+            replace_issue(issues, &updated_id, event);
+        }
         true
     }
 
@@ -328,21 +401,12 @@ impl WorkspaceCache {
         if state.latest_issue_generation != generation {
             return false;
         }
-        let Some(issue_id) = issue.get("id").and_then(Value::as_str) else {
+        let Some(issue_id) = issue.get("id").and_then(Value::as_str).map(str::to_owned) else {
             return false;
         };
-        let Some(issues) = state.issues.as_mut() else {
-            state.issues = Some(vec![issue]);
-            return true;
-        };
-        if let Some(existing) = issues
-            .iter_mut()
-            .find(|existing| existing.get("id").and_then(Value::as_str) == Some(issue_id))
-        {
-            *existing = issue;
-        } else {
-            issues.push(issue);
-        }
+        let event = state.event_overrides.get(&issue_id).cloned();
+        let issues = state.issues.get_or_insert_with(Vec::new);
+        replace_issue(issues, &issue_id, event.unwrap_or(Some(issue)));
         true
     }
 
@@ -387,6 +451,28 @@ impl WorkspaceCache {
                 || (state.issues.is_none() && state.refresh.is_some()),
             refreshing: state.refresh.is_some(),
         }
+    }
+}
+
+fn replace_issue(issues: &mut Vec<Value>, issue_id: &str, issue: Option<Value>) {
+    let existing = issues
+        .iter()
+        .position(|value| value.get("id").and_then(Value::as_str) == Some(issue_id));
+    match (existing, issue) {
+        (Some(index), Some(issue)) => issues[index] = issue,
+        (Some(index), None) => {
+            issues.remove(index);
+        }
+        (None, Some(issue)) => issues.push(issue),
+        (None, None) => {}
+    }
+}
+
+fn prune_event_overrides(state: &mut WorkspaceState) {
+    if state.refresh.is_none() && state.foreground_generation.is_none() {
+        state
+            .event_overrides
+            .retain(|id, _| state.optimistic_updates.contains_key(id));
     }
 }
 
@@ -922,6 +1008,96 @@ mod tests {
                 "is_blocked": true,
                 "blocked_by_gate": true
             })
+        );
+    }
+
+    #[test]
+    fn journal_changes_survive_an_older_in_flight_refresh() {
+        let mut cache = WorkspaceCache::default();
+        store(
+            &mut cache,
+            "/one",
+            vec![json!({"id": "old", "status": "open"})],
+        );
+        let refresh = cache.begin_refresh("/one", false).unwrap();
+
+        assert!(cache.apply_event("/one", "old", None));
+        assert!(cache.apply_event(
+            "/one",
+            "new",
+            Some(json!({"id": "new", "status": "in_progress"})),
+        ));
+        assert_eq!(
+            cache.view("/one").issues,
+            vec![json!({"id": "new", "status": "in_progress", "is_blocked": false})]
+        );
+        assert!(cache.apply_snapshot(
+            "/one",
+            refresh,
+            vec![json!({"id": "old", "status": "open"})]
+        ));
+        assert!(cache.finish_refresh("/one", refresh));
+        assert_eq!(
+            cache.view("/one").issues,
+            vec![json!({"id": "new", "status": "in_progress", "is_blocked": false})]
+        );
+    }
+
+    #[test]
+    fn journal_updates_preserve_gate_and_project_optimistic_edits() {
+        let mut cache = WorkspaceCache::default();
+        store(
+            &mut cache,
+            "/one",
+            vec![json!({"id": "one", "title": "old", "status": "open", "blocked_by_gate": true})],
+        );
+        let mutation = cache.allocate_generation();
+        assert!(cache.begin_optimistic_update(
+            "/one",
+            "one",
+            mutation,
+            OptimisticKind::Move,
+            patch(json!({"status": "closed"})),
+        ));
+        assert!(cache.apply_event(
+            "/one",
+            "one",
+            Some(json!({"id": "one", "title": "remote", "status": "open"})),
+        ));
+        let projected = cache.projected_issue("/one", "one").unwrap();
+        assert_eq!(projected["title"], "remote");
+        assert_eq!(projected["status"], "closed");
+        assert_eq!(projected["blocked_by_gate"], true);
+        assert_eq!(projected["is_blocked"], false);
+        assert!(cache.commit_optimistic_update(
+            "/one",
+            "one",
+            mutation,
+            json!({"id": "one", "title": "old", "status": "closed"}),
+        ));
+        assert_eq!(
+            cache.projected_issue("/one", "one").unwrap(),
+            json!({"id": "one", "title": "remote", "status": "open", "blocked_by_gate": true, "is_blocked": false})
+        );
+    }
+
+    #[test]
+    fn journal_delete_survives_a_foreground_create_snapshot() {
+        let mut cache = WorkspaceCache::default();
+        store(&mut cache, "/one", vec![issue("deleted")]);
+        let foreground = cache.begin_foreground("/one", true).unwrap();
+        assert!(cache.apply_event("/one", "deleted", None));
+        assert!(cache.apply_event("/one", "added", Some(issue("added"))));
+        assert!(
+            cache.apply_snapshot("/one", foreground, vec![issue("deleted"), issue("created")],)
+        );
+        assert!(cache.finish_foreground("/one", foreground));
+        assert_eq!(
+            cache.view("/one").issues,
+            vec![
+                issue("created"),
+                json!({"id": "added", "is_blocked": false})
+            ]
         );
     }
 }

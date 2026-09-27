@@ -11,6 +11,18 @@ bd create <title> ... --json
 bd update <id> ... --json
 ```
 
+On a Beads 1.3 workspace with the events journal enabled, Knecklace reads a
+snapshot and follows `bd events tail --follow` for live board changes. It still
+reads a fresh snapshot for manual reloads, gate/dependency changes, and recovery
+when a feed is interrupted. When the journal is disabled, it keeps polling as
+before. To opt in for all writers in a workspace, run
+`bd config set events-journal true` there; Knecklace does not change that setting.
+Reload after enabling it while Knecklace is already open. Timer gates are
+checked separately while the event feed is active. The journal is local to a
+clone and does not record Dolt pulls, so reload after syncing. The feed lives
+behind `bd-client` so a future `bd serve` transport can replace the CLI reader
+without changing the board.
+
 Attachment bytes are the one deliberate exception while upstream Beads attachment support is pending. On versions of `bd` without `bd attachment`, Knecklace stores content-addressed files under:
 
 ```text

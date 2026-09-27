@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod attachments;
+mod events;
+
+pub use events::{DependencyChange, EventRecord, EventStopHandle, EventTail};
 
 pub use attachments::{Attachment, AttachmentProvider, MaterializedAttachment};
 
@@ -510,7 +513,7 @@ impl Client {
         })
     }
 
-    fn check_time_gates(&self) -> Result<(), Error> {
+    pub fn check_time_gates(&self) -> Result<(), Error> {
         self.run(false, &["gate", "check", "--type", "timer", "--json"])?;
         Ok(())
     }
@@ -573,6 +576,13 @@ pub enum Error {
         status: Option<i32>,
         message: String,
     },
+    EventsDisabled,
+    EventsTruncated {
+        since: u64,
+        floor: u64,
+        head: u64,
+    },
+    EventIo(std::io::Error),
     InvalidJson {
         operation: &'static str,
         source: serde_json::Error,
@@ -616,6 +626,12 @@ impl fmt::Display for Error {
                     write!(formatter, "bd {operation} failed: {message}")
                 }
             }
+            Self::EventsDisabled => formatter.write_str("bd events journal is disabled"),
+            Self::EventsTruncated { since, floor, head } => write!(
+                formatter,
+                "bd events journal truncated since {since} (floor {floor}, head {head})"
+            ),
+            Self::EventIo(source) => write!(formatter, "bd events stream failed: {source}"),
             Self::InvalidJson { operation, source } => {
                 write!(formatter, "bd {operation} returned invalid JSON: {source}")
             }
@@ -636,7 +652,9 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidWorkspace { source, .. } | Self::Start { source, .. } => Some(source),
+            Self::InvalidWorkspace { source, .. }
+            | Self::Start { source, .. }
+            | Self::EventIo(source) => Some(source),
             Self::InvalidJson { source, .. } => Some(source),
             _ => None,
         }

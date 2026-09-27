@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use bd_client::{Issue, IssueUpdate, Status};
+use bd_client::{Client, EventRecord, EventStopHandle, Issue, IssueUpdate, Status};
 use qtbridge::{QObjectHolder, invoke_method, qobject};
 use serde_json::{Map, Value, json};
 
@@ -27,6 +27,30 @@ use crate::operations::{
     resolve_gate_and_list, update_issue,
 };
 use crate::workspace_cache::{OptimisticKind, WorkspaceCache};
+
+struct FeedSession {
+    workspace: String,
+    token: u64,
+    last_seq: u64,
+    cancelled: Arc<AtomicBool>,
+    stop: Arc<Mutex<Option<EventStopHandle>>>,
+}
+
+impl FeedSession {
+    fn stop(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        if let Ok(guard) = self.stop.lock() {
+            if let Some(handle) = guard.as_ref() {
+                let _ = handle.stop();
+            }
+        }
+    }
+}
+impl Drop for FeedSession {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
 
 #[derive(Clone)]
 struct RequestTarget {
@@ -242,6 +266,10 @@ pub(crate) struct Backend {
     loading: bool,
     refreshing: bool,
     cache: WorkspaceCache,
+    feed: Option<FeedSession>,
+    feed_pending: Option<(String, u64)>,
+    feed_fallback: HashSet<String>,
+    gate_check_running: bool,
     active_detail: Option<RequestTarget>,
     preview_requests: HashMap<u64, PreviewRequest>,
     workspace_choice: Option<(String, u64)>,
@@ -263,6 +291,10 @@ impl Default for Backend {
             loading: false,
             refreshing: false,
             cache: WorkspaceCache::default(),
+            feed: None,
+            feed_pending: None,
+            feed_fallback: HashSet::new(),
+            gate_check_running: false,
             active_detail: None,
             preview_requests: HashMap::new(),
             workspace_choice: None,
@@ -369,12 +401,34 @@ impl Backend {
 
     #[qslot]
     fn reload(&mut self) {
+        self.feed_fallback.remove(&self.workspace);
         self.start_refresh(true);
     }
 
     #[qslot]
     fn poll(&mut self) {
-        self.start_refresh(false);
+        if self
+            .feed
+            .as_ref()
+            .is_some_and(|feed| feed.workspace == self.workspace)
+        {
+            if !self.gate_check_running {
+                self.gate_check_running = true;
+                let workspace = self.workspace.clone();
+                let invoker = self.get_qml_method_invoker();
+                thread::spawn(move || {
+                    let _ = Client::new(workspace).and_then(|client| client.check_time_gates());
+                    invoke_method!(invoker, "finishGateCheck");
+                });
+            }
+        } else if self.feed_pending.is_none() {
+            self.start_refresh(false);
+        }
+    }
+
+    #[qslot(qml_name = "finishGateCheck")]
+    fn finish_gate_check(&mut self) {
+        self.gate_check_running = false;
     }
 
     #[qslot]
@@ -1176,6 +1230,10 @@ impl Backend {
             return;
         }
 
+        if let Some(feed) = self.feed.take() {
+            feed.stop();
+        }
+        self.feed_pending = None;
         self.workspace = workspace;
         self.workspace_changed();
         self.active_detail = None;
@@ -1199,14 +1257,21 @@ impl Backend {
         error: String,
         workspace: String,
         generation: String,
+        checkpoint: String,
     ) {
         let Some(generation) = parse_generation(&generation) else {
             return;
         };
         let Some(report_errors) = self.cache.refresh_reports_errors(&workspace, generation) else {
+            if self.feed_pending.as_ref() == Some(&(workspace.clone(), generation)) {
+                self.feed_pending = None;
+                if self.workspace == workspace {
+                    self.start_workspace_refresh(workspace, false);
+                }
+            }
             return;
         };
-
+        let mut applied = false;
         if !error.is_empty() {
             if report_errors {
                 self.cache.set_error(&workspace, generation, error);
@@ -1214,7 +1279,8 @@ impl Backend {
         } else {
             match serde_json::from_str::<Vec<Value>>(&payload) {
                 Ok(issues) => {
-                    if self.cache.apply_snapshot(&workspace, generation, issues) && report_errors {
+                    applied = self.cache.apply_snapshot(&workspace, generation, issues);
+                    if applied && report_errors {
                         self.cache.set_error(&workspace, generation, String::new());
                     }
                 }
@@ -1228,9 +1294,71 @@ impl Backend {
                 Err(_) => {}
             }
         }
+        if self.feed_pending.as_ref() == Some(&(workspace.clone(), generation)) {
+            self.feed_pending = None;
+            if applied && self.workspace == workspace {
+                if let Ok(seq) = checkpoint.parse::<u64>() {
+                    self.start_event_feed(workspace.clone(), generation, seq);
+                } else {
+                    self.feed_fallback.insert(workspace.clone());
+                }
+            }
+        }
         self.complete_refresh(&workspace, generation);
     }
+    #[qslot(qml_name = "receiveEvent")]
+    fn receive_event(&mut self, payload: String, workspace: String, token: String) {
+        let Some(token) = parse_generation(&token) else {
+            return;
+        };
+        let Some(feed) = self.feed.as_ref() else {
+            return;
+        };
+        if feed.workspace != workspace || feed.token != token {
+            return;
+        }
+        let Ok(event) = serde_json::from_str::<EventRecord>(&payload) else {
+            self.stop_event_feed(&workspace);
+            return;
+        };
+        if event.seq <= feed.last_seq {
+            return;
+        }
+        if let Some(feed) = self.feed.as_mut() {
+            feed.last_seq = event.seq;
+        }
+        let is_gate = event
+            .issue
+            .as_ref()
+            .is_some_and(|issue| issue.issue_type == "gate");
+        if !is_gate {
+            let issue = event
+                .issue
+                .and_then(|issue| serde_json::to_value(issue).ok());
+            if !self.cache.apply_event(&workspace, &event.issue_id, issue) {
+                self.stop_event_feed(&workspace);
+                return;
+            }
+            self.publish_active_workspace();
+        }
+        // Edge and gate changes affect the gate-specific icon and board counts.
+        // Comment records can change counts without changing the bead row.
+        if is_gate
+            || event.op == "delete"
+            || matches!(event.op.as_str(), "dep_add" | "dep_remove" | "comment")
+        {
+            self.start_workspace_refresh(workspace, false);
+        }
+    }
 
+    #[qslot(qml_name = "finishEventFeed")]
+    fn finish_event_feed(&mut self, workspace: String, token: String) {
+        if self.feed.as_ref().is_some_and(|feed| {
+            feed.workspace == workspace && Some(feed.token) == parse_generation(&token)
+        }) {
+            self.stop_event_feed(&workspace);
+        }
+    }
     #[qslot(qml_name = "finishLoadIssue")]
     fn finish_load_issue(
         &mut self,
@@ -2016,12 +2144,27 @@ impl Backend {
             self.publish_active_workspace();
             return;
         };
+        let bootstrap = workspace == self.workspace
+            && self.feed.is_none()
+            && self.feed_pending.is_none()
+            && !self.feed_fallback.contains(&workspace);
+        if bootstrap {
+            self.feed_pending = Some((workspace.clone(), generation));
+        }
         self.publish_active_workspace();
 
         let result_workspace = workspace.clone();
-        let generation = generation.to_string();
+        let generation_text = generation.to_string();
         let invoker = self.get_qml_method_invoker();
         thread::spawn(move || {
+            let checkpoint = if bootstrap {
+                Client::new(&workspace)
+                    .and_then(|client| client.events_head())
+                    .map(|seq| seq.to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
             let (payload, error) = encode_result(list_issues(workspace));
             invoke_method!(
                 invoker,
@@ -2029,9 +2172,67 @@ impl Backend {
                 payload,
                 error,
                 result_workspace,
-                generation
+                generation_text,
+                checkpoint
             );
         });
+    }
+
+    fn start_event_feed(&mut self, workspace: String, token: u64, since: u64) {
+        if let Some(feed) = self.feed.take() {
+            feed.stop();
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(Mutex::new(None));
+        self.feed = Some(FeedSession {
+            workspace: workspace.clone(),
+            token,
+            last_seq: since,
+            cancelled: cancelled.clone(),
+            stop: stop.clone(),
+        });
+        let invoker = self.get_qml_method_invoker();
+        thread::spawn(move || {
+            let result = Client::new(&workspace).and_then(|client| client.events_tail(since));
+            if let Ok(mut tail) = result {
+                if let Ok(mut guard) = stop.lock() {
+                    *guard = Some(tail.stop_handle());
+                    if cancelled.load(Ordering::Acquire) {
+                        let _ = guard.as_ref().unwrap().stop();
+                    }
+                }
+                loop {
+                    if cancelled.load(Ordering::Acquire) {
+                        break;
+                    }
+                    match tail.next_event() {
+                        Ok(Some(event)) => {
+                            if let Ok(payload) = serde_json::to_string(&event) {
+                                invoke_method!(
+                                    invoker,
+                                    "receiveEvent",
+                                    payload,
+                                    workspace.clone(),
+                                    token.to_string()
+                                );
+                            }
+                        }
+                        Ok(None) | Err(_) => break,
+                    }
+                }
+            }
+            if !cancelled.load(Ordering::Acquire) {
+                invoke_method!(invoker, "finishEventFeed", workspace, token.to_string());
+            }
+        });
+    }
+
+    fn stop_event_feed(&mut self, workspace: &str) {
+        if let Some(feed) = self.feed.take() {
+            feed.stop();
+        }
+        self.feed_fallback.insert(workspace.to_string());
+        self.start_workspace_refresh(workspace.to_string(), false);
     }
 
     fn begin_foreground(&mut self, updates_issues: bool) -> Option<(String, u64)> {
