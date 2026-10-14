@@ -37,6 +37,12 @@ When `bd attachment` becomes available, Knecklace reads both native and polyfill
 
 All build and runtime dependencies are provided by the Nix flake.
 
+When consuming this flake from a NixOS configuration, set
+`inputs.knecklace.inputs.nixpkgs.follows = "nixpkgs"` to build its bundled
+`bd`/Dolt runtime from the same nixpkgs revision as the system. This does not
+inherit system overlays. After changing Dolt versions, restart any existing
+project database server; an already-running server keeps its old executable.
+
 ```bash
 nix run . -- /path/to/a/beads/repository
 ```

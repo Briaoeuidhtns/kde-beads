@@ -17,10 +17,16 @@
             # 1.0.x queries depends_on_id, removed by newer Beads schemas.
             beads = final.symlinkJoin {
               name = "beads-1.3.0";
-              paths = [ (final.callPackage "${inputs.beads}/default.nix" {
+              paths = [ ((final.callPackage "${inputs.beads}/default.nix" {
                 self = inputs.beads;
                 buildGoModule = final.buildGo126Module;
-              }) ];
+              }).overrideAttrs (old: {
+                postPatch = (old.postPatch or "") + ''
+                  # The upstream patch selects Nix's Go version; an equal
+                  # toolchain directive makes readonly module builds fail.
+                  go mod edit -toolchain=none
+                '';
+              })) ];
               nativeBuildInputs = [ final.makeWrapper ];
               postBuild = ''
                 wrapProgram $out/bin/bd --prefix PATH : ${lib.makeBinPath [ final.dolt ]}
